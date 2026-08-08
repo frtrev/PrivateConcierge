@@ -14,12 +14,14 @@ class BootstrapUpdate {
     required this.progress,
     required this.status,
     this.requiresLocationExplanation = false,
+    this.requiresAreaDownloadConsent = false,
     this.error,
     this.ready = false,
   });
   final double progress;
   final String status;
   final bool requiresLocationExplanation;
+  final bool requiresAreaDownloadConsent;
   final Object? error;
   final bool ready;
 }
@@ -59,7 +61,10 @@ class BootstrapService {
     );
   }
 
-  Stream<BootstrapUpdate> run({bool requestLocation = false}) async* {
+  Stream<BootstrapUpdate> run({
+    bool requestLocation = false,
+    bool allowAreaDownload = false,
+  }) async* {
     try {
       yield const BootstrapUpdate(
         progress: .05,
@@ -103,24 +108,26 @@ class BootstrapService {
           status: 'Determining current region',
         );
         region = await regionResolver.resolve(coordinates!);
-        if (region == null) {
-          yield const BootstrapUpdate(
-            progress: .60,
-            status:
-                'No bundled region covers this location. You can select a development region from Home.',
-          );
-        } else {
-          yield BootstrapUpdate(
-            progress: .60,
-            status: 'Checking ${region!.displayName} geographic data',
-          );
-          if (!await packageManager.isCurrent(region!)) {
-            await for (final progress in packageManager.install(region!)) {
-              yield BootstrapUpdate(
-                progress: .60 + progress.fraction * .22,
-                status: progress.message,
-              );
-            }
+        region ??= const CurrentAreaRegionFactory().create(coordinates!);
+        yield BootstrapUpdate(
+          progress: .60,
+          status: 'Checking ${region!.displayName} geographic data',
+        );
+        if (!await packageManager.isCurrent(region!)) {
+          if (!allowAreaDownload) {
+            yield const BootstrapUpdate(
+              progress: .60,
+              status:
+                  'To build your offline baseline, the app will send a rounded approximate area—not your precise GPS point—to OpenStreetMap. No account, history, or device identifier is included.',
+              requiresAreaDownloadConsent: true,
+            );
+            return;
+          }
+          await for (final progress in packageManager.install(region!)) {
+            yield BootstrapUpdate(
+              progress: .60 + progress.fraction * .22,
+              status: progress.message,
+            );
           }
         }
       } else {

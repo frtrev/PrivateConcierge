@@ -23,10 +23,13 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
     _start();
   }
 
-  void _start({bool requestLocation = false}) {
+  void _start({bool requestLocation = false, bool allowAreaDownload = false}) {
     subscription?.cancel();
     subscription = widget.dependencies.bootstrap
-        .run(requestLocation: requestLocation)
+        .run(
+          requestLocation: requestLocation,
+          allowAreaDownload: allowAreaDownload,
+        )
         .listen((value) {
           if (!mounted) return;
           setState(() => update = value);
@@ -90,10 +93,28 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
                 child: const Text('Not now'),
               ),
             ],
+            if (update.requiresAreaDownloadConsent) ...[
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () =>
+                    _start(requestLocation: true, allowAreaDownload: true),
+                icon: const Icon(Icons.download_outlined),
+                label: const Text('Download my offline area'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        HomeScreen(dependencies: widget.dependencies),
+                  ),
+                ),
+                child: const Text('Not now'),
+              ),
+            ],
             if (update.error != null) ...[
               const SizedBox(height: 16),
               Text(
-                '${update.error}',
+                _friendlyError(update.error!),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
@@ -105,4 +126,11 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
       ),
     ),
   );
+
+  String _friendlyError(Object error) {
+    if (error is StateError) {
+      return error.message.toString();
+    }
+    return 'We could not finish setting up your offline area. Your existing downloaded places are safe. Please try again.';
+  }
 }

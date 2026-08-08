@@ -43,7 +43,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Nearby')),
+    appBar: AppBar(title: const Text('Nearby • 50 miles')),
     body: Column(
       children: [
         SizedBox(

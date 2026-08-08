@@ -1,8 +1,45 @@
+import 'dart:math' as math;
+
 import '../../core/models/geo.dart';
 import '../../core/models/region.dart';
 
 abstract interface class RegionResolver {
   Future<Region?> resolve(Coordinates coordinates);
+}
+
+class CurrentAreaRegionFactory {
+  const CurrentAreaRegionFactory();
+
+  Region create(Coordinates location, {double searchRadiusMiles = 50}) {
+    final roundedLat = (location.latitude * 10).round() / 10;
+    final roundedLon = (location.longitude * 10).round() / 10;
+    // The margin covers the maximum displacement introduced by rounding.
+    final coverageMiles = searchRadiusMiles + 8;
+    final latDelta = coverageMiles / 69.0;
+    final longitudeMilesPerDegree =
+        69.172 * math.cos(roundedLat * math.pi / 180).abs().clamp(.2, 1);
+    final lonDelta = coverageMiles / longitudeMilesPerDegree;
+    final latKey = _key(roundedLat);
+    final lonKey = _key(roundedLon);
+    return Region(
+      id: 'osm-area-$latKey-$lonKey',
+      name: 'Current area',
+      administrativeArea: '50-mile offline coverage',
+      country: '',
+      bounds: GeoBounds(
+        south: roundedLat - latDelta,
+        west: roundedLon - lonDelta,
+        north: roundedLat + latDelta,
+        east: roundedLon + lonDelta,
+      ),
+      version: 1,
+      downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
+      approximateBytes: 8000000,
+    );
+  }
+
+  String _key(double value) =>
+      value.toStringAsFixed(1).replaceAll('-', 'm').replaceAll('.', 'p');
 }
 
 class BundledRegionResolver implements RegionResolver {
