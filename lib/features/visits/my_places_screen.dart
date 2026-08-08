@@ -30,7 +30,8 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
   void _refresh() => setState(() => places = widget.privateData.customPlaces());
 
   Future<void> _addCurrentLocation() async {
-    final nameController = TextEditingController(text: 'Home');
+    var placeName = 'Home';
+    var fieldVersion = 0;
     var tag = 'home';
     var saving = false;
     String? error;
@@ -39,6 +40,7 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
       barrierDismissible: !saving,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
+          scrollable: true,
           icon: const Icon(Icons.add_location_alt_outlined, size: 40),
           title: const Text('Set current location'),
           content: Column(
@@ -65,18 +67,21 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                           : (_) => setDialogState(() {
                               tag = choice.$1;
                               if (choice.$1 != 'other') {
-                                nameController.text = choice.$2;
-                              } else if (nameController.text == 'Home' ||
-                                  nameController.text == 'Work') {
-                                nameController.clear();
+                                placeName = choice.$2;
+                              } else if (placeName == 'Home' ||
+                                  placeName == 'Work') {
+                                placeName = '';
                               }
+                              fieldVersion++;
                             }),
                     ),
                 ],
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: nameController,
+              TextFormField(
+                key: ValueKey(fieldVersion),
+                initialValue: placeName,
+                onChanged: (value) => placeName = value,
                 enabled: !saving,
                 autofocus: false,
                 textCapitalization: TextCapitalization.words,
@@ -104,7 +109,7 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
               onPressed: saving
                   ? null
                   : () async {
-                      final name = nameController.text.trim();
+                      final name = placeName.trim();
                       if (name.isEmpty) {
                         setDialogState(() => error = 'Enter a place name.');
                         return;
@@ -149,7 +154,6 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
         ),
       ),
     );
-    nameController.dispose();
   }
 
   @override
