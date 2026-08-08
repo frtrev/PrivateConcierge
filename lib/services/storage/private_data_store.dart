@@ -12,6 +12,7 @@ abstract interface class PrivateDataStore {
     required String name,
     required String tag,
     required Coordinates coordinates,
+    bool overwrite = false,
   });
   Future<List<PointOfInterest>> customPlaces();
   Future<List<PointOfInterest>> customPlacesNear(
@@ -33,7 +34,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -44,6 +45,9 @@ class SqlitePrivateDataStore implements PrivateDataStore {
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createVisitsTable(db);
         if (oldVersion < 3) await _createCustomPlacesTable(db);
+        if (oldVersion >= 3 && oldVersion < 4) {
+          await _migrateCustomPlacesToV4(db);
+        }
       },
     );
   }
@@ -53,9 +57,24 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     required String name,
     required String tag,
     required Coordinates coordinates,
+    bool overwrite = false,
   }) async {
     final db = _database ?? (throw StateError('Private database is not open'));
-    final id = 'custom-${DateTime.now().microsecondsSinceEpoch}';
+    final placeKey = _customPlaceKey(name, tag);
+    final existingRows = await db.query(
+      'custom_places',
+      where: 'place_key = ?',
+      whereArgs: [placeKey],
+      limit: 1,
+    );
+    if (existingRows.isNotEmpty && !overwrite) {
+      throw CustomPlaceConflictException(
+        _customPlaceFromRow(existingRows.first),
+      );
+    }
+    final id = existingRows.isEmpty
+        ? 'custom-${DateTime.now().microsecondsSinceEpoch}'
+        : existingRows.first['id']! as String;
     final place = PointOfInterest(
       id: id,
       regionId: 'private-custom',
@@ -66,14 +85,36 @@ class SqlitePrivateDataStore implements PrivateDataStore {
       address: '',
       description: 'Private custom place',
     );
-    await db.insert('custom_places', {
+    final values = {
       'id': place.id,
+      'place_key': placeKey,
       'name': place.name,
       'tag': place.category,
       'latitude': coordinates.latitude,
       'longitude': coordinates.longitude,
       'created_ms': DateTime.now().millisecondsSinceEpoch,
-    });
+    };
+    if (existingRows.isEmpty) {
+      await db.insert('custom_places', values);
+    } else {
+      await db.update(
+        'custom_places',
+        values,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await db.update(
+        'visited_places',
+        {
+          'name': place.name,
+          'category': place.category,
+          'latitude': coordinates.latitude,
+          'longitude': coordinates.longitude,
+        },
+        where: 'poi_id = ?',
+        whereArgs: [id],
+      );
+    }
     return place;
   }
 
@@ -212,8 +253,42 @@ class SqlitePrivateDataStore implements PrivateDataStore {
   );
 
   static Future<void> _createCustomPlacesTable(Database db) => db.execute(
-    'CREATE TABLE custom_places (id TEXT PRIMARY KEY, name TEXT NOT NULL, tag TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, created_ms INTEGER NOT NULL)',
+    'CREATE TABLE custom_places (id TEXT PRIMARY KEY, place_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tag TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, created_ms INTEGER NOT NULL)',
   );
+
+  static Future<void> _migrateCustomPlacesToV4(Database db) async {
+    await db.execute(
+      'CREATE TABLE custom_places_v4 (id TEXT PRIMARY KEY, place_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tag TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, created_ms INTEGER NOT NULL)',
+    );
+    final rows = await db.query('custom_places', orderBy: 'created_ms DESC');
+    final retainedKeys = <String>{};
+    for (final row in rows) {
+      final id = row['id']! as String;
+      final key = _customPlaceKey(
+        row['name']! as String,
+        row['tag']! as String,
+      );
+      if (!retainedKeys.add(key)) {
+        await db.delete('visited_places', where: 'poi_id = ?', whereArgs: [id]);
+        continue;
+      }
+      await db.insert('custom_places_v4', {...row, 'place_key': key});
+    }
+    await db.execute('DROP TABLE custom_places');
+    await db.execute('ALTER TABLE custom_places_v4 RENAME TO custom_places');
+  }
+
+  static String _customPlaceKey(String name, String tag) {
+    final normalizedTag = tag.trim().toLowerCase();
+    if (normalizedTag == 'home' || normalizedTag == 'work') {
+      return normalizedTag;
+    }
+    final normalizedName = name.trim().toLowerCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+    return 'other:$normalizedName';
+  }
 
   PointOfInterest _customPlaceFromRow(Map<String, Object?> row) =>
       PointOfInterest(
@@ -229,4 +304,9 @@ class SqlitePrivateDataStore implements PrivateDataStore {
         address: '',
         description: 'Private custom place',
       );
+}
+
+class CustomPlaceConflictException implements Exception {
+  const CustomPlaceConflictException(this.existing);
+  final PointOfInterest existing;
 }

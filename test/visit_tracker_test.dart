@@ -29,6 +29,7 @@ class MemoryPrivateDataStore implements PrivateDataStore {
     required String name,
     required String tag,
     required Coordinates coordinates,
+    bool overwrite = false,
   }) async {
     final place = PointOfInterest(
       id: 'custom-${custom.length}',

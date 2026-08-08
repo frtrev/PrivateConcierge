@@ -118,12 +118,13 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                         saving = true;
                         error = null;
                       });
+                      Coordinates? currentCoordinates;
                       try {
-                        final coordinates = await widget.getCurrentLocation();
+                        currentCoordinates = await widget.getCurrentLocation();
                         await widget.privateData.saveCustomPlace(
                           name: name,
                           tag: tag,
-                          coordinates: coordinates,
+                          coordinates: currentCoordinates,
                         );
                         if (!mounted || !dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
@@ -131,6 +132,57 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                         ScaffoldMessenger.of(this.context).showSnackBar(
                           SnackBar(
                             content: Text('$name saved on this device.'),
+                          ),
+                        );
+                      } on CustomPlaceConflictException catch (conflict) {
+                        if (!mounted || !dialogContext.mounted) return;
+                        setDialogState(() => saving = false);
+                        final overwrite = await showDialog<bool>(
+                          context: this.context,
+                          builder: (context) => AlertDialog(
+                            icon: const Icon(Icons.location_on_outlined),
+                            title: Text(
+                              '${conflict.existing.name} already exists',
+                            ),
+                            content: const Text(
+                              'Would you like to replace its saved location, or return and enter another name?',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('Use another name'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('Overwrite'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (overwrite != true ||
+                            !mounted ||
+                            !dialogContext.mounted) {
+                          if (dialogContext.mounted) {
+                            setDialogState(
+                              () => error =
+                                  'Choose another name, or select a different tag.',
+                            );
+                          }
+                          return;
+                        }
+                        setDialogState(() => saving = true);
+                        await widget.privateData.saveCustomPlace(
+                          name: name,
+                          tag: tag,
+                          coordinates: currentCoordinates!,
+                          overwrite: true,
+                        );
+                        if (!mounted || !dialogContext.mounted) return;
+                        Navigator.pop(dialogContext);
+                        _refresh();
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          SnackBar(
+                            content: Text('$name updated on this device.'),
                           ),
                         );
                       } catch (_) {
