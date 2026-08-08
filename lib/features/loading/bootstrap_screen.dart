@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../app/app_dependencies.dart';
 import '../../core/models/region.dart';
 import '../home/home_screen.dart';
@@ -136,61 +137,124 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Icon(Icons.shield_outlined, size: 76),
-            const SizedBox(height: 18),
-            Text(
-              'Private Concierge',
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'The phone is the assistant.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 42),
-            LinearProgressIndicator(value: update.progress),
-            const SizedBox(height: 16),
-            Text(update.status, textAlign: TextAlign.center),
-            if (update.requiresLocationExplanation) ...[
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: () => _start(requestLocation: true),
-                icon: const Icon(Icons.location_on_outlined),
-                label: const Text('Continue with location'),
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: SystemUiOverlayStyle.light.copyWith(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: Colors.black,
+    ),
+    child: Scaffold(
+      backgroundColor: Colors.black,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final height = constraints.maxHeight;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                'assets/images/splashscreen.png',
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
               ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        HomeScreen(dependencies: widget.dependencies),
+              Positioned(
+                left: constraints.maxWidth * .14,
+                right: constraints.maxWidth * .14,
+                bottom: height * .025,
+                height: height * .125,
+                child: Container(
+                  color: const Color(0xff050505),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'L O A D I N G',
+                        style: TextStyle(
+                          color: Color(0xffe5b956),
+                          fontSize: 16,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: update.progress,
+                          minHeight: 6,
+                          backgroundColor: const Color(0xff272727),
+                          valueColor: const AlwaysStoppedAnimation(
+                            Color(0xffe5b956),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        update.status,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xffe5b956),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: const Text('Not now'),
               ),
+              if (update.requiresLocationExplanation || update.error != null)
+                Positioned(
+                  left: 24,
+                  right: 24,
+                  bottom: height * .17,
+                  child: Card(
+                    color: const Color(0xf2141414),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            update.error == null
+                                ? 'Use your location to select private offline coverage. Coordinates stay on this device.'
+                                : '${update.error}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: update.error == null
+                                  ? Colors.white
+                                  : const Color(0xffff8a80),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          if (update.requiresLocationExplanation) ...[
+                            FilledButton.icon(
+                              onPressed: () => _start(requestLocation: true),
+                              icon: const Icon(Icons.location_on_outlined),
+                              label: const Text('Continue with location'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(context).pushReplacement(
+                                    MaterialPageRoute(
+                                      builder: (_) => HomeScreen(
+                                        dependencies: widget.dependencies,
+                                      ),
+                                    ),
+                                  ),
+                              child: const Text('Not now'),
+                            ),
+                          ] else
+                            FilledButton(
+                              onPressed: _start,
+                              child: const Text('Retry'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
-            if (update.error != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                '${update.error}',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _start, child: const Text('Retry')),
-            ],
-          ],
-        ),
+          );
+        },
       ),
     ),
   );
