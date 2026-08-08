@@ -14,6 +14,7 @@ import '../services/notifications/notification_service.dart';
 import '../services/storage/private_data_store.dart';
 import '../services/voice/voice_recognition_service.dart';
 import '../services/visits/visit_tracker.dart';
+import 'app_theme_controller.dart';
 
 class AppDependencies {
   AppDependencies._({
@@ -24,6 +25,7 @@ class AppDependencies {
     required this.voice,
     required this.privateData,
     required this.visitTracker,
+    required this.themeController,
   });
   final BootstrapService bootstrap;
   final RegionPackageManager packages;
@@ -32,6 +34,7 @@ class AppDependencies {
   final VoiceRecognitionService voice;
   final PrivateDataStore privateData;
   final VisitTracker visitTracker;
+  final AppThemeController themeController;
   static Future<AppDependencies> create() async {
     final preferences = await SharedPreferences.getInstance();
     final poi = SqlitePoiRepository();
@@ -56,6 +59,7 @@ class AppDependencies {
       voice: voice,
       privateData: privateData,
       visitTracker: VisitTracker(location, poi, privateData),
+      themeController: AppThemeController(preferences),
       bootstrap: BootstrapService(
         poiRepository: poi,
         privateDataStore: privateData,

@@ -46,6 +46,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         title: const Text('Private Concierge'),
         actions: [
+          ListenableBuilder(
+            listenable: widget.dependencies.themeController,
+            builder: (context, _) => Tooltip(
+              message: widget.dependencies.themeController.isDark
+                  ? 'Use light theme'
+                  : 'Use dark theme',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.dependencies.themeController.isDark
+                        ? Icons.dark_mode_outlined
+                        : Icons.light_mode_outlined,
+                    size: 20,
+                  ),
+                  Switch(
+                    value: widget.dependencies.themeController.isDark,
+                    onChanged: widget.dependencies.themeController.setDark,
+                  ),
+                ],
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Privacy settings',
             icon: const Icon(Icons.privacy_tip_outlined),
