@@ -17,6 +17,8 @@ Offline POIs come from the Overture Maps Places theme. The repository contains c
 
 Visited places are a separate private dataset in `private_user_data.db`. While the app is in the foreground, it checks the current location every 30 seconds. Remaining within 75 meters of the same downloaded POI for two minutes records one visit; another count requires at least four hours. Only the aggregate place, count, and first/last timestamps are stored—no raw route history. Visit history can be deleted independently from the Privacy screen.
 
+The private database also contains a small user-managed custom POI layer. **My places → Set current location** saves Home, Work, or another named tag using the device's current coordinates. Custom POIs are matched before public Overture places, can accumulate visits in Most Visited, remain available independently of downloaded regions, and can be deleted separately.
+
 ## Run
 
 ```sh

@@ -4,6 +4,7 @@ import '../nearby/nearby_screen.dart';
 import '../settings/privacy_screen.dart';
 import '../voice_assistant/voice_assistant_screen.dart';
 import '../visits/most_visited_screen.dart';
+import '../visits/my_places_screen.dart';
 import '../../services/geography/region_resolver.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -95,6 +96,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               MaterialPageRoute(
                 builder: (_) =>
                     VoiceAssistantScreen(dependencies: widget.dependencies),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.home_work_outlined),
+            label: const Text('My places'),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MyPlacesScreen(
+                  privateData: widget.dependencies.privateData,
+                  getCurrentLocation:
+                      widget.dependencies.bootstrap.refreshCurrentLocation,
+                ),
               ),
             ),
           ),

@@ -62,10 +62,16 @@ class VisitTracker {
 
   @visibleForTesting
   Future<void> recordObservation(Coordinates coordinates, DateTime at) async {
-    final nearby = await _poiRepository.nearby(
+    final custom = await _privateDataStore.customPlacesNear(
       coordinates,
       radiusMeters: visitRadiusMeters,
     );
+    final nearby = custom.isNotEmpty
+        ? custom
+        : await _poiRepository.nearby(
+            coordinates,
+            radiusMeters: visitRadiusMeters,
+          );
     if (nearby.isEmpty) {
       _resetCandidate();
       return;

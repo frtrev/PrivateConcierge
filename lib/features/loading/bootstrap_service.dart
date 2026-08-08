@@ -46,6 +46,11 @@ class BootstrapService {
   Coordinates? coordinates;
   Region? region;
 
+  Future<Coordinates> refreshCurrentLocation() async {
+    coordinates = await locationService.currentLocation();
+    return coordinates!;
+  }
+
   Future<void> selectDevelopmentRegion(Region selected) async {
     region = selected;
     coordinates = Coordinates(

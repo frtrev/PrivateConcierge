@@ -61,7 +61,19 @@ class PrivacyScreen extends StatelessWidget {
             }
           },
         ),
-        const ListTile(enabled: false, title: Text('Delete learned places')),
+        ListTile(
+          leading: const Icon(Icons.home_work_outlined),
+          title: const Text('Delete custom places'),
+          subtitle: const Text('Removes Home, Work, and other private POIs'),
+          onTap: () async {
+            await privateData.deleteCustomPlaces();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Custom places deleted.')),
+              );
+            }
+          },
+        ),
         const ListTile(enabled: false, title: Text('Delete reminders')),
         FilledButton.tonalIcon(
           icon: const Icon(Icons.delete_outline),

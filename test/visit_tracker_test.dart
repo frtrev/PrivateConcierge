@@ -21,8 +21,46 @@ class UnusedLocationService implements LocationService {
 
 class MemoryPrivateDataStore implements PrivateDataStore {
   final recorded = <PointOfInterest>[];
+  final custom = <PointOfInterest>[];
   @override
   Future<void> open() async {}
+  @override
+  Future<PointOfInterest> saveCustomPlace({
+    required String name,
+    required String tag,
+    required Coordinates coordinates,
+  }) async {
+    final place = PointOfInterest(
+      id: 'custom-${custom.length}',
+      regionId: 'private-custom',
+      name: name,
+      coordinates: coordinates,
+      category: tag,
+      subcategory: 'custom',
+      address: '',
+    );
+    custom.add(place);
+    return place;
+  }
+
+  @override
+  Future<List<PointOfInterest>> customPlaces() async => custom;
+  @override
+  Future<List<PointOfInterest>> customPlacesNear(
+    Coordinates coordinates, {
+    double radiusMeters = 100,
+  }) async => custom
+      .map(
+        (place) =>
+            place.withDistance(distanceMeters(coordinates, place.coordinates)),
+      )
+      .where((place) => place.distanceMeters! <= radiusMeters)
+      .toList();
+  @override
+  Future<void> deleteCustomPlace(String id) async =>
+      custom.removeWhere((place) => place.id == id);
+  @override
+  Future<void> deleteCustomPlaces() async => custom.clear();
   @override
   Future<void> recordVisit(PointOfInterest place, DateTime visitedAt) async {
     recorded.add(place);
@@ -75,5 +113,38 @@ void main() {
       started.add(const Duration(minutes: 3)),
     );
     expect(privateData.recorded.map((place) => place.id), ['cafe']);
+  });
+
+  test('prefers a private custom POI over overlapping public data', () async {
+    final repository = MemoryPoiRepository()
+      ..points.add(
+        const PointOfInterest(
+          id: 'public-cafe',
+          regionId: 'region',
+          name: 'Public Cafe',
+          coordinates: Coordinates(35.1, -89.6),
+          category: 'restaurant',
+          subcategory: 'cafe',
+          address: '',
+        ),
+      );
+    final privateData = MemoryPrivateDataStore();
+    await privateData.saveCustomPlace(
+      name: 'Home',
+      tag: 'home',
+      coordinates: const Coordinates(35.1, -89.6),
+    );
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      repository,
+      privateData,
+      minimumDwell: Duration.zero,
+    );
+    final at = DateTime(2026, 8, 8, 12);
+
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+
+    expect(privateData.recorded.single.id, 'custom-0');
   });
 }

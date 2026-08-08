@@ -62,7 +62,7 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
                 ),
                 SizedBox(height: 10),
                 Text(
-                  'While the app is open, staying near the same place for about two minutes records a private visit on this device.',
+                  'While the app is open, staying near the same public or custom place for about two minutes records a private visit on this device.',
                   textAlign: TextAlign.center,
                 ),
               ],
