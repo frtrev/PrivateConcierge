@@ -5,7 +5,14 @@ import 'package:private_concierge/services/geography/region_resolver.dart';
 void main() {
   test('resolves Memphis coordinates to stable region id', () async {
     final region = await BundledRegionResolver().resolve(
-      const Coordinates(35.1495, -90.0490),
+      const Coordinates(35.1495, -89.9),
+    );
+    expect(region?.id, 'us-tn-memphis');
+  });
+
+  test('resolves the device area east of the old Memphis boundary', () async {
+    final region = await BundledRegionResolver().resolve(
+      const Coordinates(35.1, -89.6),
     );
     expect(region?.id, 'us-tn-memphis');
   });

@@ -35,8 +35,8 @@ Memphis, Nashville, and Dallas can also be selected from **Download an offline r
 Install the official `overturemaps` Python client, export the `place` type for a region's bounding box as GeoJSONSeq, then normalize it:
 
 ```sh
-overturemaps download --bbox=-90.35,34.95,-89.65,35.38 -f geojson --type=place -o memphis.geojsonseq
-python3 tool/normalize_overture_places.py memphis.geojsonseq assets/overture/us-tn-memphis.jsonl.gz us-tn-memphis
+overturemaps download --bbox=-90.042,34.738,-89.158,35.462 -f geojsonseq --type=place -o memphis.geojsonseq
+python3 tool/normalize_overture_places.py memphis.geojsonseq assets/overture/us-tn-memphis.jsonl.gz us-tn-memphis --center=35.1,-89.6 --radius-miles=25
 shasum -a 256 assets/overture/us-tn-memphis.jsonl.gz
 ```
 

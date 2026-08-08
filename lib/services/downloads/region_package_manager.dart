@@ -31,7 +31,7 @@ class OvertureRegionPackageManager implements RegionPackageManager {
   static const _prefix = 'public_region_version_';
   static const expectedHashes = {
     'us-tn-memphis':
-        'f42c45d7784b66d0c50edf0b09335eb3ec2a878ca009708a08c2d5805c6cdc14',
+        '7141b38fffa0a537dca276ff07912d47552a2c9cfb8e8b33ec79d1b707196927',
     'us-tn-nashville':
         '4593556bf28a360b782ff062ad356f563f1f3770d8dc224f4c1e48639ed53002',
     'us-tx-dallas':

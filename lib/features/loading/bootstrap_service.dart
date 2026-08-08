@@ -100,20 +100,23 @@ class BootstrapService {
         );
         region = await regionResolver.resolve(coordinates!);
         if (region == null) {
-          throw StateError(
-            'No downloadable region is available here. You can continue and select a region manually.',
+          yield const BootstrapUpdate(
+            progress: .60,
+            status:
+                'No offline package covers this location yet. Continuing with manual region selection.',
           );
-        }
-        yield BootstrapUpdate(
-          progress: .60,
-          status: 'Checking ${region!.displayName} geographic data',
-        );
-        if (!await packageManager.isCurrent(region!)) {
-          await for (final progress in packageManager.install(region!)) {
-            yield BootstrapUpdate(
-              progress: .60 + progress.fraction * .22,
-              status: progress.message,
-            );
+        } else {
+          yield BootstrapUpdate(
+            progress: .60,
+            status: 'Checking ${region!.displayName} geographic data',
+          );
+          if (!await packageManager.isCurrent(region!)) {
+            await for (final progress in packageManager.install(region!)) {
+              yield BootstrapUpdate(
+                progress: .60 + progress.fraction * .22,
+                status: progress.message,
+              );
+            }
           }
         }
       } else {

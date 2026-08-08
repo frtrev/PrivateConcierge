@@ -4,6 +4,7 @@
 import argparse
 import gzip
 import json
+import math
 from pathlib import Path
 
 
@@ -28,7 +29,22 @@ def app_category(primary: str | None) -> str | None:
     return None
 
 
-def normalize(source: Path, output: Path, region_id: str) -> int:
+def distance_miles(latitude: float, longitude: float, center: tuple[float, float]) -> float:
+    radius_miles = 3958.8
+    lat1, lat2 = map(math.radians, (latitude, center[0]))
+    delta_lat = lat2 - lat1
+    delta_lon = math.radians(center[1] - longitude)
+    value = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
+    return radius_miles * 2 * math.asin(math.sqrt(value))
+
+
+def normalize(
+    source: Path,
+    output: Path,
+    region_id: str,
+    center: tuple[float, float] | None = None,
+    radius_miles: float | None = None,
+) -> int:
     count = 0
     with source.open(encoding="utf-8") as source_file, gzip.open(output, "wt", encoding="utf-8") as target:
         for line in source_file:
@@ -42,6 +58,8 @@ def normalize(source: Path, output: Path, region_id: str) -> int:
             name = (properties.get("names") or {}).get("primary")
             coordinates = (feature.get("geometry") or {}).get("coordinates")
             if not category or not name or not coordinates or len(coordinates) < 2:
+                continue
+            if center and radius_miles and distance_miles(coordinates[1], coordinates[0], center) > radius_miles:
                 continue
             addresses = properties.get("addresses") or []
             address = (addresses[0].get("freeform") or "") if addresses else ""
@@ -64,9 +82,14 @@ def main() -> None:
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("region_id")
+    parser.add_argument("--center", help="Latitude,longitude center for a circular extract")
+    parser.add_argument("--radius-miles", type=float)
     args = parser.parse_args()
+    center = tuple(map(float, args.center.split(","))) if args.center else None
+    if bool(center) != bool(args.radius_miles):
+        parser.error("--center and --radius-miles must be used together")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    print(normalize(args.source, args.output, args.region_id))
+    print(normalize(args.source, args.output, args.region_id, center, args.radius_miles))
 
 
 if __name__ == "__main__":

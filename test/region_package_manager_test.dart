@@ -37,7 +37,7 @@ void main() {
     final updates = await manager.install(bundledRegions.first).toList();
     expect(updates.last.fraction, 1);
     expect(await manager.isCurrent(bundledRegions.first), isTrue);
-    expect(repository.points.length, 9095);
+    expect(repository.points.length, 8180);
     expect(
       (await manager.installedRegions()).single.id,
       bundledRegions.first.id,

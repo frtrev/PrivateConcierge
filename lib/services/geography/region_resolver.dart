@@ -25,16 +25,16 @@ final bundledRegions = <Region>[
     administrativeArea: 'Tennessee',
     country: 'US',
     bounds: const GeoBounds(
-      south: 34.95,
-      west: -90.35,
-      north: 35.38,
-      east: -89.65,
+      south: 34.738,
+      west: -90.042,
+      north: 35.462,
+      east: -89.158,
     ),
-    version: 20260715,
+    version: 20260808,
     downloadUrl: Uri.parse(
       'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis.jsonl.gz',
     ),
-    approximateBytes: 492087,
+    approximateBytes: 443716,
   ),
   Region(
     id: 'us-tn-nashville',
