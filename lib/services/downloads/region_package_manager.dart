@@ -1,4 +1,5 @@
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/models/region.dart';
@@ -59,7 +60,11 @@ class OvertureRegionPackageManager implements RegionPackageManager {
           if (update.points != null) completed = update;
         }
         break;
-      } catch (_) {
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('Overture package attempt $attempt failed: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        }
         if (attempt == 3) {
           throw const OverturePackageException(
             'The offline places package is temporarily unavailable. Please check your connection and try again later.',

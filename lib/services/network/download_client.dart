@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 
@@ -56,16 +57,29 @@ class BundledFallbackDownloadClient implements DownloadClient {
   @override
   Stream<DownloadChunk> downloadPublicResource(Uri uri) async* {
     try {
-      yield* _primary.downloadPublicResource(uri);
-    } catch (_) {
-      final data = await rootBundle.load(
-        'assets/overture/${uri.pathSegments.last}',
-      );
-      final bytes = data.buffer.asUint8List(
-        data.offsetInBytes,
-        data.lengthInBytes,
-      );
-      yield DownloadChunk(bytes, bytes.length, bytes.length);
+      await for (final chunk in _primary.downloadPublicResource(uri)) {
+        yield chunk;
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Remote Overture package unavailable; using asset: $error');
+      }
+      try {
+        final data = await rootBundle.load(
+          'assets/overture/${uri.pathSegments.last}',
+        );
+        final bytes = data.buffer.asUint8List(
+          data.offsetInBytes,
+          data.lengthInBytes,
+        );
+        yield DownloadChunk(bytes, bytes.length, bytes.length);
+      } catch (assetError, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('Bundled Overture package failed: $assetError');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+        rethrow;
+      }
     }
   }
 }
