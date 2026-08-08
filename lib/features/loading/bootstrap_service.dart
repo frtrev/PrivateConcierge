@@ -45,14 +45,18 @@ class BootstrapService {
   Region? region;
 
   Future<void> selectDevelopmentRegion(Region selected) async {
+    await activateDevelopmentRegion(selected);
+    if (!await packageManager.isCurrent(selected)) {
+      await packageManager.install(selected).drain<void>();
+    }
+  }
+
+  Future<void> activateDevelopmentRegion(Region selected) async {
     region = selected;
     coordinates = Coordinates(
       (selected.bounds.south + selected.bounds.north) / 2,
       (selected.bounds.west + selected.bounds.east) / 2,
     );
-    if (!await packageManager.isCurrent(selected)) {
-      await packageManager.install(selected).drain<void>();
-    }
   }
 
   Stream<BootstrapUpdate> run({bool requestLocation = false}) async* {
@@ -100,20 +104,23 @@ class BootstrapService {
         );
         region = await regionResolver.resolve(coordinates!);
         if (region == null) {
-          throw StateError(
-            'No downloadable region is available here. You can continue and select a region manually.',
+          yield const BootstrapUpdate(
+            progress: .60,
+            status:
+                'No bundled region covers this location. You can select a development region from Home.',
           );
-        }
-        yield BootstrapUpdate(
-          progress: .60,
-          status: 'Checking ${region!.displayName} geographic data',
-        );
-        if (!await packageManager.isCurrent(region!)) {
-          await for (final progress in packageManager.install(region!)) {
-            yield BootstrapUpdate(
-              progress: .60 + progress.fraction * .22,
-              status: progress.message,
-            );
+        } else {
+          yield BootstrapUpdate(
+            progress: .60,
+            status: 'Checking ${region!.displayName} geographic data',
+          );
+          if (!await packageManager.isCurrent(region!)) {
+            await for (final progress in packageManager.install(region!)) {
+              yield BootstrapUpdate(
+                progress: .60 + progress.fraction * .22,
+                status: progress.message,
+              );
+            }
           }
         }
       } else {

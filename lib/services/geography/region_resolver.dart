@@ -30,11 +30,9 @@ final bundledRegions = <Region>[
       north: 35.38,
       east: -89.65,
     ),
-    version: 1,
-    downloadUrl: Uri.parse(
-      'https://static.example.invalid/regions/us-tn-memphis-v1.zip',
-    ),
-    approximateBytes: 24000,
+    version: 2,
+    downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
+    approximateBytes: 2500000,
   ),
   Region(
     id: 'us-tn-nashville',
@@ -47,11 +45,9 @@ final bundledRegions = <Region>[
       north: 36.42,
       east: -86.50,
     ),
-    version: 1,
-    downloadUrl: Uri.parse(
-      'https://static.example.invalid/regions/us-tn-nashville-v1.zip',
-    ),
-    approximateBytes: 24000,
+    version: 2,
+    downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
+    approximateBytes: 2500000,
   ),
   Region(
     id: 'us-tx-dallas',
@@ -64,10 +60,8 @@ final bundledRegions = <Region>[
       north: 33.10,
       east: -96.45,
     ),
-    version: 1,
-    downloadUrl: Uri.parse(
-      'https://static.example.invalid/regions/us-tx-dallas-v1.zip',
-    ),
-    approximateBytes: 24000,
+    version: 2,
+    downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
+    approximateBytes: 2500000,
   ),
 ];

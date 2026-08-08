@@ -26,7 +26,9 @@ Use mock Memphis GPS without device location:
 flutter run --dart-define=USE_MOCK_LOCATION=true
 ```
 
-Memphis, Nashville, and Dallas can also be selected from **Select development region** on the home screen. Each installs a verified bundled sample POI package.
+Memphis, Nashville, and Dallas can also be selected from **Select development region** on the home screen. Each downloads named POIs from OpenStreetMap through Overpass using the region's fixed public bounding box. User coordinates are never included in that request. Downloaded JSON is SHA-256 fingerprinted, normalized, and transactionally installed in the public SQLite database.
+
+POI data is © OpenStreetMap contributors and available under the Open Database License: https://www.openstreetmap.org/copyright
 
 On-device speech is enabled only when Android reports an on-device recognizer. The app never silently falls back to a cloud recognizer. Android Auto provides Car App Library screens for Assistant and Nearby; direct car microphone and the native-to-Flutter POI bridge remain explicit next milestones.
 

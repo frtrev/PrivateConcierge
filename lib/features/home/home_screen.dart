@@ -4,6 +4,8 @@ import '../nearby/nearby_screen.dart';
 import '../settings/privacy_screen.dart';
 import '../voice_assistant/voice_assistant_screen.dart';
 import '../../services/geography/region_resolver.dart';
+import '../../core/models/region.dart';
+import '../../services/downloads/region_package_manager.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.dependencies});
@@ -13,6 +15,63 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  Future<void> _downloadRegion(Region region, {bool activate = true}) async {
+    Object? failure;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: Text('Downloading ${region.displayName}'),
+          content: StreamBuilder<PackageProgress>(
+            stream: widget.dependencies.packages.install(region),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                failure = snapshot.error;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                });
+                return Text('Download failed: ${snapshot.error}');
+              }
+              final progress = snapshot.data;
+              if (snapshot.connectionState == ConnectionState.done) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                });
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  LinearProgressIndicator(value: progress?.fraction),
+                  const SizedBox(height: 16),
+                  Text(progress?.message ?? 'Connecting to OpenStreetMap…'),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Only this fixed region boundary is sent. Your location is not included.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (failure != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not download POIs: $failure')),
+      );
+      return;
+    }
+    if (activate) {
+      await widget.dependencies.bootstrap.activateDevelopmentRegion(region);
+    }
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final bootstrap = widget.dependencies.bootstrap;
@@ -110,7 +169,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.download_done),
                         title: Text(r.displayName),
-                        subtitle: Text('Version ${r.installedVersion}'),
+                        subtitle: FutureBuilder<int?>(
+                          future: widget.dependencies.packages
+                              .installedPoiCount(r),
+                          builder: (context, countSnapshot) => Text(
+                            countSnapshot.data == null
+                                ? 'OpenStreetMap data • version ${r.installedVersion}'
+                                : '${countSnapshot.data} real POIs • OpenStreetMap',
+                          ),
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Refresh real POIs',
+                          icon: const Icon(Icons.refresh),
+                          onPressed: () => _downloadRegion(r, activate: false),
+                        ),
                       ),
                     )
                     .toList(),
@@ -127,9 +199,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 shrinkWrap: true,
                 children: [
                   const ListTile(
-                    title: Text('Bundled development regions'),
+                    title: Text('Download a real POI region'),
                     subtitle: Text(
-                      'Installs sample public POIs and uses the region center as mock GPS.',
+                      'Downloads current OpenStreetMap places, then uses the region center as mock GPS.',
                     ),
                   ),
                   for (final candidate in bundledRegions)
@@ -137,16 +209,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       leading: const Icon(Icons.location_city),
                       title: Text(candidate.displayName),
                       onTap: () async {
-                        await widget.dependencies.bootstrap
-                            .selectDevelopmentRegion(candidate);
-                        if (!sheetContext.mounted) return;
                         Navigator.pop(sheetContext);
-                        setState(() {});
+                        await _downloadRegion(candidate);
                       },
                     ),
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'POI data © OpenStreetMap contributors • ODbL\nhttps://www.openstreetmap.org/copyright',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12),
           ),
         ],
       ),
