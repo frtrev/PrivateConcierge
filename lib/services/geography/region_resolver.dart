@@ -30,11 +30,11 @@ final bundledRegions = <Region>[
       north: 35.38,
       east: -89.65,
     ),
-    version: 1,
+    version: 20260715,
     downloadUrl: Uri.parse(
-      'https://static.example.invalid/regions/us-tn-memphis-v1.zip',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis.jsonl.gz',
     ),
-    approximateBytes: 24000,
+    approximateBytes: 492087,
   ),
   Region(
     id: 'us-tn-nashville',
@@ -47,11 +47,11 @@ final bundledRegions = <Region>[
       north: 36.42,
       east: -86.50,
     ),
-    version: 1,
+    version: 20260715,
     downloadUrl: Uri.parse(
-      'https://static.example.invalid/regions/us-tn-nashville-v1.zip',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-nashville.jsonl.gz',
     ),
-    approximateBytes: 24000,
+    approximateBytes: 568262,
   ),
   Region(
     id: 'us-tx-dallas',
@@ -64,10 +64,10 @@ final bundledRegions = <Region>[
       north: 33.10,
       east: -96.45,
     ),
-    version: 1,
+    version: 20260715,
     downloadUrl: Uri.parse(
-      'https://static.example.invalid/regions/us-tx-dallas-v1.zip',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tx-dallas.jsonl.gz',
     ),
-    approximateBytes: 24000,
+    approximateBytes: 1631087,
   ),
 ];

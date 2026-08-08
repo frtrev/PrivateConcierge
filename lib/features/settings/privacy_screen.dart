@@ -35,6 +35,18 @@ class PrivacyScreen extends StatelessWidget {
           title: Text('Location uploaded to our servers'),
           subtitle: Text('Never'),
         ),
+        const ListTile(
+          leading: Icon(Icons.public_outlined),
+          title: Text('Offline places data'),
+          subtitle: Text(
+            'Static Overture Maps region packages are downloaded without sending your coordinates.',
+          ),
+        ),
+        const ListTile(
+          leading: Icon(Icons.info_outline),
+          title: Text('Public data attribution'),
+          subtitle: Text('Overture Maps Foundation • overturemaps.org'),
+        ),
         const Divider(),
         const ListTile(
           enabled: false,

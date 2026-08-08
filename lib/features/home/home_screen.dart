@@ -110,7 +110,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.download_done),
                         title: Text(r.displayName),
-                        subtitle: Text('Version ${r.installedVersion}'),
+                        subtitle: Text(
+                          'Overture Maps • version ${r.installedVersion}',
+                        ),
                       ),
                     )
                     .toList(),
@@ -119,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           OutlinedButton.icon(
             icon: const Icon(Icons.map_outlined),
-            label: const Text('Select development region'),
+            label: const Text('Download an offline region'),
             onPressed: () => showModalBottomSheet<void>(
               context: context,
               showDragHandle: true,
@@ -127,9 +129,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 shrinkWrap: true,
                 children: [
                   const ListTile(
-                    title: Text('Bundled development regions'),
+                    title: Text('Overture Maps regions'),
                     subtitle: Text(
-                      'Installs sample public POIs and uses the region center as mock GPS.',
+                      'Downloads a verified static Places package. Choosing a region also uses its center as the development location.',
                     ),
                   ),
                   for (final candidate in bundledRegions)

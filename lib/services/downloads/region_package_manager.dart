@@ -1,12 +1,10 @@
-import 'dart:async';
-import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/models/geo.dart';
-import '../../core/models/poi.dart';
+
 import '../../core/models/region.dart';
 import '../../repositories/poi_repository.dart';
 import '../geography/region_resolver.dart';
+import 'overture_package_source.dart';
 
 class PackageProgress {
   const PackageProgress(this.fraction, this.message);
@@ -21,85 +19,130 @@ abstract interface class RegionPackageManager {
   Future<void> delete(Region region);
 }
 
-class LocalRegionPackageManager implements RegionPackageManager {
-  LocalRegionPackageManager(this._preferences, this._repository);
+class OvertureRegionPackageManager implements RegionPackageManager {
+  OvertureRegionPackageManager(
+    this._preferences,
+    this._repository,
+    this._source,
+  );
   final SharedPreferences _preferences;
   final PoiRepository _repository;
+  final OverturePackageSource _source;
   static const _prefix = 'public_region_version_';
+  static const expectedHashes = {
+    'us-tn-memphis':
+        'f42c45d7784b66d0c50edf0b09335eb3ec2a878ca009708a08c2d5805c6cdc14',
+    'us-tn-nashville':
+        '4593556bf28a360b782ff062ad356f563f1f3770d8dc224f4c1e48639ed53002',
+    'us-tx-dallas':
+        'e52b4c980bea425012ce2d670c8859e4f14cb4a54cb87a3a0cae3b01efdda5da',
+  };
+
   @override
   Future<bool> isCurrent(Region region) async =>
       _preferences.getInt('$_prefix${region.id}') == region.version;
+
   @override
   Stream<PackageProgress> install(Region region) async* {
-    yield const PackageProgress(.1, 'Preparing public region package');
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    final points = _samplePoints(region);
-    final payload = jsonEncode(points.map((e) => e.id).toList());
-    final expected = sha256.convert(utf8.encode(payload));
-    yield const PackageProgress(.4, 'Verifying package integrity');
-    if (sha256.convert(utf8.encode(payload)) != expected) {
-      throw const FormatException('Region package integrity check failed');
+    OverturePackageDownload? completed;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        yield PackageProgress(
+          .03,
+          'Downloading Overture Maps package • attempt $attempt of 3',
+        );
+        await for (final update in _source.download(region)) {
+          yield PackageProgress(
+            .05 + (update.fraction ?? .1) * .62,
+            'Downloading Overture Places • ${_formatBytes(update.bytes)}',
+          );
+          if (update.points != null) completed = update;
+        }
+        break;
+      } catch (_) {
+        if (attempt == 3) {
+          throw const OverturePackageException(
+            'The offline places package is temporarily unavailable. Please check your connection and try again later.',
+          );
+        }
+        yield PackageProgress(
+          .05 + attempt * .1,
+          'Download interrupted • retrying shortly',
+        );
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
     }
-    yield const PackageProgress(.65, 'Installing local POI database');
-    await _repository.replaceRegion(region.id, points);
+    if (completed?.points == null || completed?.compressedBytes == null) {
+      throw const OverturePackageException(
+        'The offline places package could not be verified.',
+      );
+    }
+    yield const PackageProgress(.72, 'Verifying Overture Maps package');
+    final actualHash = sha256.convert(completed!.compressedBytes!).toString();
+    if (actualHash != expectedHashes[region.id]) {
+      throw const OverturePackageException(
+        'The offline places package could not be verified.',
+      );
+    }
+    yield PackageProgress(
+      .82,
+      'Installing ${completed.points!.length} real places locally',
+    );
+    await _repository.replaceRegion(region.id, completed.points!);
+    final now = DateTime.now();
     await _preferences.setInt('$_prefix${region.id}', region.version);
     await _preferences.setString(
       'public_region_updated_${region.id}',
-      DateTime.now().toIso8601String(),
+      now.toIso8601String(),
     );
-    yield const PackageProgress(1, 'Region ready');
+    await _preferences.setInt(
+      'public_region_poi_count_${region.id}',
+      completed.points!.length,
+    );
+    await _preferences.setString(
+      'public_region_source_${region.id}',
+      'Overture Maps',
+    );
+    yield PackageProgress(
+      1,
+      '${completed.points!.length} Overture places ready',
+    );
   }
 
   @override
   Future<List<Region>> installedRegions() async => bundledRegions
-      .where((r) => _preferences.containsKey('$_prefix${r.id}'))
+      .where((region) => _preferences.containsKey('$_prefix${region.id}'))
       .map(
-        (r) => r.installed(
-          _preferences.getInt('$_prefix${r.id}')!,
+        (region) => region.installed(
+          _preferences.getInt('$_prefix${region.id}')!,
           DateTime.parse(
-            _preferences.getString('public_region_updated_${r.id}')!,
+            _preferences.getString('public_region_updated_${region.id}')!,
           ),
         ),
       )
       .toList();
+
   @override
   Future<void> delete(Region region) async {
     await _repository.deleteRegion(region.id);
-    await _preferences.remove('$_prefix${region.id}');
-    await _preferences.remove('public_region_updated_${region.id}');
+    for (final key in [
+      '$_prefix${region.id}',
+      'public_region_updated_${region.id}',
+      'public_region_poi_count_${region.id}',
+      'public_region_source_${region.id}',
+    ]) {
+      await _preferences.remove(key);
+    }
   }
 
-  List<PointOfInterest> _samplePoints(Region region) {
-    final center = Coordinates(
-      (region.bounds.south + region.bounds.north) / 2,
-      (region.bounds.west + region.bounds.east) / 2,
-    );
-    const data = [
-      ('Riverfront Grill', 'restaurant', 'American'),
-      ('Heritage Park', 'park', 'City park'),
-      ('Community Church', 'church', 'Church'),
-      ('Neighborhood Fitness', 'gym', 'Fitness'),
-      ('Historic Square', 'historic', 'Landmark'),
-      ('Central Fuel', 'gas', 'Gas station'),
-      ('Local Market', 'grocery', 'Grocery'),
-      ('City Museum', 'museum', 'Museum'),
-      ('Visitor Center', 'attraction', 'Attraction'),
-    ];
-    return [
-      for (var i = 0; i < data.length; i++)
-        PointOfInterest(
-          id: '${region.id}-$i',
-          regionId: region.id,
-          name: data[i].$1,
-          coordinates: Coordinates(
-            center.latitude + i * .003,
-            center.longitude + i * .002,
-          ),
-          category: data[i].$2,
-          subcategory: data[i].$3,
-          address: '${100 + i} Main Street, ${region.name}',
-          description: 'Bundled development POI',
-        ),
-    ];
-  }
+  String _formatBytes(int bytes) => bytes < 1024 * 1024
+      ? '${(bytes / 1024).toStringAsFixed(0)} KB'
+      : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+class OverturePackageException implements Exception {
+  const OverturePackageException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
