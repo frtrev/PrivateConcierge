@@ -48,10 +48,18 @@ class PrivacyScreen extends StatelessWidget {
           subtitle: Text('Overture Maps Foundation • overturemaps.org'),
         ),
         const Divider(),
-        const ListTile(
-          enabled: false,
-          title: Text('Delete location history'),
-          subtitle: Text('Available when history is added'),
+        ListTile(
+          leading: const Icon(Icons.history_outlined),
+          title: const Text('Delete location history'),
+          subtitle: const Text('Removes locally recorded visited places'),
+          onTap: () async {
+            await privateData.deleteVisitHistory();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Visit history deleted.')),
+              );
+            }
+          },
         ),
         const ListTile(enabled: false, title: Text('Delete learned places')),
         const ListTile(enabled: false, title: Text('Delete reminders')),

@@ -15,6 +15,8 @@ Public geographic data uses `public_geography.db`. Private user data uses `priva
 
 Offline POIs come from the Overture Maps Places theme. The repository contains compact, checksum-verified regional packages generated from the official GeoParquet distribution. Downloads are static files, so the phone never submits its current coordinates to a geographic query service. If a package host is temporarily unavailable, the app uses the matching copy bundled in the APK.
 
+Visited places are a separate private dataset in `private_user_data.db`. While the app is in the foreground, it checks the current location every 30 seconds. Remaining within 75 meters of the same downloaded POI for two minutes records one visit; another count requires at least four hours. Only the aggregate place, count, and first/last timestamps are stored—no raw route history. Visit history can be deleted independently from the Privacy screen.
+
 ## Run
 
 ```sh

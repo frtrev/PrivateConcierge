@@ -3,6 +3,7 @@ import '../../app/app_dependencies.dart';
 import '../nearby/nearby_screen.dart';
 import '../settings/privacy_screen.dart';
 import '../voice_assistant/voice_assistant_screen.dart';
+import '../visits/most_visited_screen.dart';
 import '../../services/geography/region_resolver.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -12,7 +13,30 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.dependencies.visitTracker.start();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      widget.dependencies.visitTracker.start();
+    } else {
+      widget.dependencies.visitTracker.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.dependencies.visitTracker.stop();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final bootstrap = widget.dependencies.bootstrap;
@@ -71,6 +95,19 @@ class _HomeScreenState extends State<HomeScreen> {
               MaterialPageRoute(
                 builder: (_) =>
                     VoiceAssistantScreen(dependencies: widget.dependencies),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.insights_outlined),
+            label: const Text('Most visited places'),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MostVisitedScreen(
+                  privateData: widget.dependencies.privateData,
+                ),
               ),
             ),
           ),
