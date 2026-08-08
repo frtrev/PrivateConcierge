@@ -32,7 +32,7 @@ final bundledRegions = <Region>[
     ),
     version: 20260809,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tn-memphis.jsonl.gz',
     ),
     approximateBytes: 443716,
     coverageMiles: 25,
@@ -51,7 +51,7 @@ final bundledRegions = <Region>[
     ),
     version: 20260809,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis-50mi.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tn-memphis-50mi.jsonl.gz',
     ),
     approximateBytes: 677771,
     coverageMiles: 50,
@@ -70,7 +70,7 @@ final bundledRegions = <Region>[
     ),
     version: 20260715,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-nashville.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tn-nashville.jsonl.gz',
     ),
     approximateBytes: 568262,
   ),
@@ -87,7 +87,7 @@ final bundledRegions = <Region>[
     ),
     version: 20260715,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tx-dallas.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tx-dallas.jsonl.gz',
     ),
     approximateBytes: 1631087,
   ),
