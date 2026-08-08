@@ -30,11 +30,32 @@ final bundledRegions = <Region>[
       north: 35.462,
       east: -89.158,
     ),
-    version: 20260808,
+    version: 20260809,
     downloadUrl: Uri.parse(
       'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis.jsonl.gz',
     ),
     approximateBytes: 443716,
+    coverageMiles: 25,
+    approximatePoiCount: 8180,
+  ),
+  Region(
+    id: 'us-tn-memphis-50mi',
+    name: 'Memphis',
+    administrativeArea: 'Tennessee',
+    country: 'US',
+    bounds: const GeoBounds(
+      south: 34.376,
+      west: -90.484,
+      north: 35.824,
+      east: -88.716,
+    ),
+    version: 20260809,
+    downloadUrl: Uri.parse(
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis-50mi.jsonl.gz',
+    ),
+    approximateBytes: 677771,
+    coverageMiles: 50,
+    approximatePoiCount: 12448,
   ),
   Region(
     id: 'us-tn-nashville',
@@ -71,3 +92,9 @@ final bundledRegions = <Region>[
     approximateBytes: 1631087,
   ),
 ];
+
+List<Region> downloadOptionsFor(Coordinates coordinates) =>
+    bundledRegions
+        .where((region) => region.bounds.contains(coordinates))
+        .toList()
+      ..sort((a, b) => a.coverageMiles.compareTo(b.coverageMiles));

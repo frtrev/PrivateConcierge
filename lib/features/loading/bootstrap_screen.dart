@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../app/app_dependencies.dart';
+import '../../core/models/region.dart';
 import '../home/home_screen.dart';
 import 'bootstrap_service.dart';
 
@@ -17,19 +18,23 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
     status: 'Starting…',
   );
   StreamSubscription<BootstrapUpdate>? subscription;
+  bool dialogOpen = false;
   @override
   void initState() {
     super.initState();
     _start();
   }
 
-  void _start({bool requestLocation = false}) {
+  void _start({bool requestLocation = false, Region? confirmedRegion}) {
     subscription?.cancel();
     subscription = widget.dependencies.bootstrap
-        .run(requestLocation: requestLocation)
+        .run(requestLocation: requestLocation, confirmedRegion: confirmedRegion)
         .listen((value) {
           if (!mounted) return;
           setState(() => update = value);
+          if (value.downloadOptions.isNotEmpty && !dialogOpen) {
+            unawaited(_showRegionDownload(value.downloadOptions));
+          }
           if (value.ready) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
@@ -39,6 +44,90 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
           }
         });
   }
+
+  Future<void> _showRegionDownload(List<Region> options) async {
+    dialogOpen = true;
+    var selected = options.firstWhere(
+      (option) => option.coverageMiles == 25,
+      orElse: () => options.first,
+    );
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          icon: const Icon(Icons.download_for_offline_outlined, size: 40),
+          title: const Text('Set up offline places'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Private Concierge will make a one-time download for ${selected.displayName}. Your location is not included in the request.',
+              ),
+              const SizedBox(height: 20),
+              const Text('Choose coverage'),
+              const SizedBox(height: 8),
+              SegmentedButton<int>(
+                segments: [
+                  for (final option in options)
+                    ButtonSegment<int>(
+                      value: option.coverageMiles,
+                      label: Text('${option.coverageMiles} miles'),
+                    ),
+                ],
+                selected: {selected.coverageMiles},
+                onSelectionChanged: (selection) => setDialogState(() {
+                  selected = options.firstWhere(
+                    (option) => option.coverageMiles == selection.single,
+                  );
+                }),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'About ${_formatBytes(selected.approximateBytes)} • approximately ${selected.approximatePoiCount ?? 0} places',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                selected.coverageMiles == 25
+                    ? 'Recommended for a faster first setup.'
+                    : 'Broader coverage takes more storage and longer to install.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                Navigator.of(this.context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        HomeScreen(dependencies: widget.dependencies),
+                  ),
+                );
+              },
+              child: const Text('Not now'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _start(requestLocation: true, confirmedRegion: selected);
+              },
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Download once'),
+            ),
+          ],
+        ),
+      ),
+    );
+    dialogOpen = false;
+  }
+
+  String _formatBytes(int bytes) => bytes < 1024 * 1024
+      ? '${(bytes / 1024).ceil()} KB'
+      : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 
   @override
   void dispose() {

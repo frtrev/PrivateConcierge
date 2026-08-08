@@ -15,6 +15,12 @@ void main() {
       const Coordinates(35.1, -89.6),
     );
     expect(region?.id, 'us-tn-memphis');
+    expect(
+      downloadOptionsFor(
+        const Coordinates(35.1, -89.6),
+      ).map((option) => option.coverageMiles),
+      [25, 50],
+    );
   });
   test('returns null outside the bundled index', () async {
     expect(

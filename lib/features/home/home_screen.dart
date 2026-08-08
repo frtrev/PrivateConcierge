@@ -53,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Text(
                     region == null
                         ? 'Choose a downloaded region to use nearby search.'
-                        : 'Downloaded • version ${region.version}',
+                        : 'Downloaded • ${region.coverageMiles}-mile coverage',
                   ),
                 ],
               ),
@@ -111,7 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         leading: const Icon(Icons.download_done),
                         title: Text(r.displayName),
                         subtitle: Text(
-                          'Overture Maps • version ${r.installedVersion}',
+                          'Overture Maps • ${r.coverageMiles} miles • version ${r.installedVersion}',
                         ),
                       ),
                     )
@@ -137,7 +137,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   for (final candidate in bundledRegions)
                     ListTile(
                       leading: const Icon(Icons.location_city),
-                      title: Text(candidate.displayName),
+                      title: Text(
+                        '${candidate.displayName} • ${candidate.coverageMiles} miles',
+                      ),
                       onTap: () async {
                         await widget.dependencies.bootstrap
                             .selectDevelopmentRegion(candidate);

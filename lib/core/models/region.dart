@@ -10,6 +10,8 @@ class Region {
     required this.version,
     required this.downloadUrl,
     required this.approximateBytes,
+    this.coverageMiles = 25,
+    this.approximatePoiCount,
     this.installedVersion,
     this.lastUpdated,
   });
@@ -21,6 +23,8 @@ class Region {
   final int version;
   final Uri downloadUrl;
   final int approximateBytes;
+  final int coverageMiles;
+  final int? approximatePoiCount;
   final int? installedVersion;
   final DateTime? lastUpdated;
 
@@ -34,6 +38,8 @@ class Region {
     version: this.version,
     downloadUrl: downloadUrl,
     approximateBytes: approximateBytes,
+    coverageMiles: coverageMiles,
+    approximatePoiCount: approximatePoiCount,
     installedVersion: version,
     lastUpdated: date,
   );

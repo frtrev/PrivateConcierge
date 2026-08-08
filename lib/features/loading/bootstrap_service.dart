@@ -14,12 +14,14 @@ class BootstrapUpdate {
     required this.progress,
     required this.status,
     this.requiresLocationExplanation = false,
+    this.downloadOptions = const [],
     this.error,
     this.ready = false,
   });
   final double progress;
   final String status;
   final bool requiresLocationExplanation;
+  final List<Region> downloadOptions;
   final Object? error;
   final bool ready;
 }
@@ -55,7 +57,10 @@ class BootstrapService {
     }
   }
 
-  Stream<BootstrapUpdate> run({bool requestLocation = false}) async* {
+  Stream<BootstrapUpdate> run({
+    bool requestLocation = false,
+    Region? confirmedRegion,
+  }) async* {
     try {
       yield const BootstrapUpdate(
         progress: .05,
@@ -98,7 +103,17 @@ class BootstrapService {
           progress: .52,
           status: 'Determining current region',
         );
-        region = await regionResolver.resolve(coordinates!);
+        final options = downloadOptionsFor(coordinates!);
+        region = confirmedRegion;
+        if (region == null) {
+          for (final option in options.reversed) {
+            if (await packageManager.isCurrent(option)) {
+              region = option;
+              break;
+            }
+          }
+        }
+        region ??= await regionResolver.resolve(coordinates!);
         if (region == null) {
           yield const BootstrapUpdate(
             progress: .60,
@@ -111,6 +126,14 @@ class BootstrapService {
             status: 'Checking ${region!.displayName} geographic data',
           );
           if (!await packageManager.isCurrent(region!)) {
+            if (confirmedRegion == null) {
+              yield BootstrapUpdate(
+                progress: .60,
+                status: 'Choose your offline coverage',
+                downloadOptions: options,
+              );
+              return;
+            }
             await for (final progress in packageManager.install(region!)) {
               yield BootstrapUpdate(
                 progress: .60 + progress.fraction * .22,

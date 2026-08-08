@@ -33,6 +33,8 @@ class OvertureRegionPackageManager implements RegionPackageManager {
   static const expectedHashes = {
     'us-tn-memphis':
         '7141b38fffa0a537dca276ff07912d47552a2c9cfb8e8b33ec79d1b707196927',
+    'us-tn-memphis-50mi':
+        'f8241a86cc90b0b1e7e170ecd4d233896f3d31a44b911f763df9fe0c4046b8cb',
     'us-tn-nashville':
         '4593556bf28a360b782ff062ad356f563f1f3770d8dc224f4c1e48639ed53002',
     'us-tx-dallas':
@@ -94,6 +96,14 @@ class OvertureRegionPackageManager implements RegionPackageManager {
       'Installing ${completed.points!.length} real places locally',
     );
     await _repository.replaceRegion(region.id, completed.points!);
+    for (final sibling in bundledRegions.where(
+      (candidate) =>
+          candidate.id != region.id &&
+          candidate.name == region.name &&
+          candidate.administrativeArea == region.administrativeArea,
+    )) {
+      await delete(sibling);
+    }
     final now = DateTime.now();
     await _preferences.setInt('$_prefix${region.id}', region.version);
     await _preferences.setString(
