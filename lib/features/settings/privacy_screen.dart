@@ -35,13 +35,6 @@ class PrivacyScreen extends StatelessWidget {
           title: Text('Location uploaded to our servers'),
           subtitle: Text('Never'),
         ),
-        const ListTile(
-          leading: Icon(Icons.public_outlined),
-          title: Text('OpenStreetMap downloads'),
-          subtitle: Text(
-            'A rounded approximate area is shared only when downloading or refreshing public POIs. Precise GPS and history stay local.',
-          ),
-        ),
         const Divider(),
         const ListTile(
           enabled: false,

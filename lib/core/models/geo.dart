@@ -1,7 +1,5 @@
 import 'dart:math' as math;
 
-const metersPerMile = 1609.344;
-
 class Coordinates {
   const Coordinates(this.latitude, this.longitude);
   final double latitude;

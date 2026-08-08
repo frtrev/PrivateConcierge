@@ -28,8 +28,6 @@ flutter run --dart-define=USE_MOCK_LOCATION=true
 
 Memphis, Nashville, and Dallas can also be selected from **Select development region** on the home screen. Each downloads named POIs from OpenStreetMap through Overpass using the region's fixed public bounding box. User coordinates are never included in that request. Downloaded JSON is SHA-256 fingerprinted, normalized, and transactionally installed in the public SQLite database.
 
-For locations outside the bundled development regions, the app rounds the current coordinates locally to 0.1 degree, adds a coverage margin, and asks for consent before submitting that approximate bounding box to OpenStreetMap. The precise GPS point, location history, account data, and device identifiers are not included. Nearby queries then run locally with a default radius of 50 miles.
-
 POI data is © OpenStreetMap contributors and available under the Open Database License: https://www.openstreetmap.org/copyright
 
 On-device speech is enabled only when Android reports an on-device recognizer. The app never silently falls back to a cloud recognizer. Android Auto provides Car App Library screens for Assistant and Nearby; direct car microphone and the native-to-Flutter POI bridge remain explicit next milestones.

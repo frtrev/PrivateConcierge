@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (dialogContext.mounted) Navigator.pop(dialogContext);
                 });
-                return const Text('We could not finish the download.');
+                return Text('Download failed: ${snapshot.error}');
               }
               final progress = snapshot.data;
               if (snapshot.connectionState == ConnectionState.done) {
@@ -61,38 +61,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (!mounted) return;
     if (failure != null) {
-      final retry = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          icon: const Icon(Icons.cloud_off_outlined),
-          title: const Text('Download not completed'),
-          content: Text(_friendlyDownloadMessage(failure!)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Try again'),
-            ),
-          ],
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not download POIs: $failure')),
       );
-      if (retry == true && mounted) {
-        await _downloadRegion(region, activate: activate);
-      }
       return;
     }
     if (activate) {
       await widget.dependencies.bootstrap.activateDevelopmentRegion(region);
     }
     if (mounted) setState(() {});
-  }
-
-  String _friendlyDownloadMessage(Object failure) {
-    if (failure is RegionDownloadException) return failure.userMessage;
-    return 'The downloaded place data could not be verified. Nothing was changed, and any existing places are still available. Please try again.';
   }
 
   @override
@@ -132,19 +109,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
-                  if (region == null)
-                    const Text(
-                      'Choose a downloaded region to use nearby search.',
-                    )
-                  else
-                    FutureBuilder<bool>(
-                      future: widget.dependencies.packages.isCurrent(region),
-                      builder: (context, snapshot) => Text(
-                        snapshot.data == true
-                            ? 'Downloaded • 50-mile local search ready'
-                            : 'Offline area not downloaded yet',
-                      ),
-                    ),
+                  Text(
+                    region == null
+                        ? 'Choose a downloaded region to use nearby search.'
+                        : 'Downloaded • version ${region.version}',
+                  ),
                 ],
               ),
             ),
@@ -167,7 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 12),
           OutlinedButton.icon(
             icon: const Icon(Icons.near_me_outlined),
-            label: const Text('Explore within 50 miles'),
+            label: const Text('Explore nearby'),
             onPressed: bootstrap.coordinates == null
                 ? null
                 : () => Navigator.push(

@@ -100,7 +100,7 @@ void main() {
   });
 
   test(
-    'unsupported bundled location requests approximate-area consent',
+    'unsupported location reaches Home-ready state for manual selection',
     () async {
       final service = BootstrapService(
         poiRepository: _Poi(),
@@ -112,7 +112,11 @@ void main() {
         notificationService: PlaceholderNotificationService(),
       );
       final updates = await service.run().toList();
-      expect(updates.last.requiresAreaDownloadConsent, isTrue);
+      expect(
+        updates.any((update) => update.status.contains('No bundled region')),
+        isTrue,
+      );
+      expect(updates.last.ready, isTrue);
       expect(updates.last.error, isNull);
     },
   );

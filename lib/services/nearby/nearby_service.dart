@@ -8,7 +8,7 @@ class NearbyService {
   Future<List<PointOfInterest>> search(
     Coordinates origin, {
     String? category,
-    double radiusMeters = 50 * metersPerMile,
+    double radiusMeters = 15000,
   }) => _repository.nearby(
     origin,
     category: category,

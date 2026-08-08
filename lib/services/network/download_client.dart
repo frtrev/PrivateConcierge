@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
 class PublicDownloadRequest {
@@ -47,68 +49,35 @@ class HttpPublicDownloadClient implements DownloadClient {
       ..headers['Content-Type'] =
           'application/x-www-form-urlencoded; charset=utf-8'
       ..bodyFields = request.formFields;
-    late http.StreamedResponse response;
-    try {
-      response = await _client
-          .send(httpRequest)
-          .timeout(const Duration(seconds: 75));
-    } on TimeoutException {
-      throw const PublicDownloadException(
-        kind: PublicDownloadFailure.timeout,
-        retryable: true,
-      );
-    } on http.ClientException {
-      throw const PublicDownloadException(
-        kind: PublicDownloadFailure.connection,
-        retryable: true,
-      );
-    }
+    final response = await _client
+        .send(httpRequest)
+        .timeout(const Duration(seconds: 75));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      // Drain the response, but never expose a server's HTML error body to UI.
-      await response.stream.drain<void>();
-      throw PublicDownloadException(
-        kind: PublicDownloadFailure.server,
-        retryable:
-            response.statusCode == 429 ||
-            (response.statusCode >= 502 && response.statusCode <= 504),
-        statusCode: response.statusCode,
+      final detail = await response.stream.bytesToString();
+      throw HttpException(
+        'Geographic data server returned ${response.statusCode}: ${_short(detail)}',
       );
     }
     var received = 0;
-    try {
-      await for (final bytes in response.stream.timeout(
-        const Duration(seconds: 75),
-      )) {
-        received += bytes.length;
-        yield DownloadChunk(
-          bytes: bytes,
-          receivedBytes: received,
-          totalBytes: response.contentLength,
-        );
-      }
-    } on TimeoutException {
-      throw const PublicDownloadException(
-        kind: PublicDownloadFailure.timeout,
-        retryable: true,
-      );
-    } on http.ClientException {
-      throw const PublicDownloadException(
-        kind: PublicDownloadFailure.connection,
-        retryable: true,
+    await for (final bytes in response.stream.timeout(
+      const Duration(seconds: 75),
+    )) {
+      received += bytes.length;
+      yield DownloadChunk(
+        bytes: bytes,
+        receivedBytes: received,
+        totalBytes: response.contentLength,
       );
     }
   }
+
+  String _short(String value) =>
+      const LineSplitter().convert(value).take(2).join(' ').trim();
 }
 
-enum PublicDownloadFailure { timeout, connection, server }
-
-class PublicDownloadException implements Exception {
-  const PublicDownloadException({
-    required this.kind,
-    required this.retryable,
-    this.statusCode,
-  });
-  final PublicDownloadFailure kind;
-  final bool retryable;
-  final int? statusCode;
+class HttpException implements Exception {
+  const HttpException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }

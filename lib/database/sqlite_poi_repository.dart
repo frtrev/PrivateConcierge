@@ -46,7 +46,7 @@ class SqlitePoiRepository implements PoiRepository {
   Future<List<PointOfInterest>> nearby(
     Coordinates origin, {
     String? category,
-    double radiusMeters = 50 * metersPerMile,
+    double radiusMeters = 15000,
   }) async {
     final rows = await _db.query(
       'poi',

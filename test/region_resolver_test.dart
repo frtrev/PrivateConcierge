@@ -15,24 +15,4 @@ void main() {
       isNull,
     );
   });
-
-  test('current area rounds coordinates and covers a local 50-mile radius', () {
-    const location = Coordinates(41.8781, -87.6298);
-    final region = const CurrentAreaRegionFactory().create(location);
-    expect(region.id, 'osm-area-41p9-m87p6');
-    expect(region.bounds.contains(location), isTrue);
-    expect(
-      distanceMeters(
-        location,
-        Coordinates(location.latitude + 50 / 69, location.longitude),
-      ),
-      closeTo(50 * metersPerMile, 1500),
-    );
-    expect(
-      region.bounds.contains(
-        Coordinates(location.latitude + 50 / 69, location.longitude),
-      ),
-      isTrue,
-    );
-  });
 }

@@ -24,8 +24,7 @@ class Region {
   final int? installedVersion;
   final DateTime? lastUpdated;
 
-  String get displayName =>
-      administrativeArea.isEmpty ? name : '$name, $administrativeArea';
+  String get displayName => '$name, $administrativeArea';
   Region installed(int version, DateTime date) => Region(
     id: id,
     name: name,
