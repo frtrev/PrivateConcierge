@@ -50,8 +50,11 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
           const SizedBox(height: 32),
           TextField(
             controller: nameController,
-            onChanged: (_) => setState(() {}),
             textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            autofillHints: const [AutofillHints.name],
+            selectAllOnFocus: true,
+            onSubmitted: (_) => FocusScope.of(context).unfocus(),
             decoration: const InputDecoration(
               labelText: 'Name or preferred form of address',
               hintText: 'Francisco',
@@ -60,16 +63,34 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
           const SizedBox(height: 20),
           const Text('How should I address you?'),
           const SizedBox(height: 8),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'mr', label: Text('Mr.')),
-              ButtonSegment(value: 'maam', label: Text('Ma’am')),
-              ButtonSegment(value: 'name', label: Text('By name')),
-              ButtonSegment(value: 'other', label: Text('Other')),
-            ],
-            selected: {address},
-            onSelectionChanged: (value) =>
-                setState(() => address = value.single),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const spacing = 10.0;
+              final width = (constraints.maxWidth - spacing) / 2;
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: [
+                  for (final option in const [
+                    ('mr', 'Mr.'),
+                    ('maam', 'Ma’am'),
+                    ('name', 'By name'),
+                    ('other', 'Other'),
+                  ])
+                    SizedBox(
+                      width: width,
+                      child: ChoiceChip(
+                        label: SizedBox(
+                          width: double.infinity,
+                          child: Text(option.$2, textAlign: TextAlign.center),
+                        ),
+                        selected: address == option.$1,
+                        onSelected: (_) => setState(() => address = option.$1),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 24),
           const Text('Assistant personality'),
@@ -95,21 +116,25 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
             ),
           ),
           const SizedBox(height: 28),
-          FilledButton.icon(
-            onPressed: saving || nameController.text.trim().isEmpty
-                ? null
-                : () async {
-                    setState(() => saving = true);
-                    await widget.onComplete(
-                      UserProfile(
-                        addressStyle: address,
-                        name: nameController.text.trim(),
-                        personality: personality,
-                      ),
-                    );
-                  },
-            icon: const Icon(Icons.check),
-            label: Text(saving ? 'Saving…' : 'Continue'),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: nameController,
+            builder: (context, value, _) => FilledButton.icon(
+              onPressed: saving || value.text.trim().isEmpty
+                  ? null
+                  : () async {
+                      FocusScope.of(context).unfocus();
+                      setState(() => saving = true);
+                      await widget.onComplete(
+                        UserProfile(
+                          addressStyle: address,
+                          name: nameController.text.trim(),
+                          personality: personality,
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.check),
+              label: Text(saving ? 'Saving…' : 'Continue'),
+            ),
           ),
         ],
       ),
