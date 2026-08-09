@@ -15,7 +15,9 @@ class NearbyScreen extends StatefulWidget {
 }
 
 class _NearbyScreenState extends State<NearbyScreen> {
+  final searchController = TextEditingController();
   String? category;
+  String query = '';
   late Future<List<PointOfInterest>> results;
   static const categories = [
     'restaurant',
@@ -38,7 +40,14 @@ class _NearbyScreenState extends State<NearbyScreen> {
     results = widget.dependencies.nearby.search(
       widget.dependencies.bootstrap.coordinates!,
       category: category,
+      query: query,
     );
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -46,6 +55,31 @@ class _NearbyScreenState extends State<NearbyScreen> {
     appBar: AppBar(title: const Text('Nearby')),
     body: Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: SearchBar(
+            controller: searchController,
+            hintText: 'Search downloaded places',
+            leading: const Icon(Icons.search),
+            trailing: query.isEmpty
+                ? null
+                : [
+                    IconButton(
+                      tooltip: 'Clear search',
+                      icon: const Icon(Icons.clear),
+                      onPressed: () => setState(() {
+                        searchController.clear();
+                        query = '';
+                        _search();
+                      }),
+                    ),
+                  ],
+            onChanged: (value) => setState(() {
+              query = value;
+              _search();
+            }),
+          ),
+        ),
         SizedBox(
           height: 56,
           child: ListView(
@@ -86,8 +120,16 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 return const Center(child: CircularProgressIndicator());
               }
               if (snapshot.data!.isEmpty) {
-                return const Center(
-                  child: Text('No matching places in this downloaded region.'),
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Text(
+                      query.isEmpty
+                          ? 'No matching places in this downloaded region.'
+                          : '“$query” is not in this downloaded Overture package.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 );
               }
               return ListView.builder(

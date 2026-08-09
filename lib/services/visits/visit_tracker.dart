@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../core/models/geo.dart';
-import '../../core/models/poi.dart';
 import '../../repositories/poi_repository.dart';
 import '../location/location_service.dart';
 import '../storage/private_data_store.dart';
@@ -13,9 +12,11 @@ class VisitTracker {
     this._locationService,
     this._poiRepository,
     this._privateDataStore, {
-    this.visitRadiusMeters = 75,
-    this.minimumDwell = const Duration(minutes: 2),
+    this.visitRadiusMeters = 40,
+    this.minimumDwell = const Duration(minutes: 5),
     this.pollInterval = const Duration(seconds: 30),
+    this.minimumObservations = 3,
+    this.ambiguityMarginMeters = 20,
   });
 
   final LocationService _locationService;
@@ -24,13 +25,15 @@ class VisitTracker {
   final double visitRadiusMeters;
   final Duration minimumDwell;
   final Duration pollInterval;
+  final int minimumObservations;
+  final double ambiguityMarginMeters;
 
   Timer? _timer;
   StreamSubscription<Coordinates>? _locationSubscription;
   String? _candidateId;
-  PointOfInterest? _candidate;
   DateTime? _candidateSince;
   bool _recordedCandidate = false;
+  int _candidateObservations = 0;
   bool _observing = false;
 
   void start() {
@@ -92,13 +95,6 @@ class VisitTracker {
 
   @visibleForTesting
   Future<void> recordObservation(Coordinates coordinates, DateTime at) async {
-    if (!_recordedCandidate &&
-        _candidate != null &&
-        _candidateSince != null &&
-        at.difference(_candidateSince!) >= minimumDwell) {
-      await _privateDataStore.recordVisit(_candidate!, at);
-      _recordedCandidate = true;
-    }
     final custom = await _privateDataStore.customPlacesNear(
       coordinates,
       radiusMeters: visitRadiusMeters,
@@ -113,15 +109,24 @@ class VisitTracker {
       _resetCandidate();
       return;
     }
+    if (nearby.length > 1 &&
+        nearby[1].distanceMeters! - nearby[0].distanceMeters! <
+            ambiguityMarginMeters) {
+      _resetCandidate();
+      return;
+    }
     final candidate = nearby.first;
     if (_candidateId != candidate.id) {
       _candidateId = candidate.id;
-      _candidate = candidate;
       _candidateSince = at;
+      _candidateObservations = 1;
       _recordedCandidate = false;
       return;
     }
-    if (_recordedCandidate || at.difference(_candidateSince!) < minimumDwell) {
+    _candidateObservations++;
+    if (_recordedCandidate ||
+        _candidateObservations < minimumObservations ||
+        at.difference(_candidateSince!) < minimumDwell) {
       return;
     }
     await _privateDataStore.recordVisit(candidate, at);
@@ -130,8 +135,8 @@ class VisitTracker {
 
   void _resetCandidate() {
     _candidateId = null;
-    _candidate = null;
     _candidateSince = null;
+    _candidateObservations = 0;
     _recordedCandidate = false;
   }
 }

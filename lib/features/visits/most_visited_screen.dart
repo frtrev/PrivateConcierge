@@ -74,7 +74,7 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'Enable background visits, then staying near the same public or custom place for about two minutes records a private visit on this device.',
+                  'Enable background visits, then several consistent observations near the same public or custom place over about five minutes record a private visit on this device.',
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -180,7 +180,7 @@ class _BackgroundTrackingCard extends StatelessWidget {
           subtitle: Text(
             active
                 ? 'Location is processed and stored only on this device.'
-                : 'Requires “Always” location access. iOS shows the location indicator while tracking.',
+                : 'Requires “Always” location access. iOS delivers power-managed location events in the background.',
           ),
           trailing: active
               ? const Icon(Icons.check_circle)

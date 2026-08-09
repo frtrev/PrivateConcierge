@@ -43,8 +43,8 @@ class GeolocatorLocationService implements LocationService {
         accuracy: LocationAccuracy.medium,
         activityType: ActivityType.other,
         distanceFilter: 25,
-        pauseLocationUpdatesAutomatically: false,
-        showBackgroundLocationIndicator: background,
+        pauseLocationUpdatesAutomatically: true,
+        showBackgroundLocationIndicator: false,
         allowBackgroundLocationUpdates: background,
       );
     } else if (Platform.isAndroid) {

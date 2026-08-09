@@ -147,6 +147,7 @@ void main() {
       repository,
       privateData,
       minimumDwell: Duration.zero,
+      minimumObservations: 2,
     );
     final at = DateTime(2026, 8, 8, 12);
 
@@ -156,37 +157,34 @@ void main() {
     expect(privateData.recorded.single.id, 'custom-0');
   });
 
-  test(
-    'records a background dwell when the next update is departure',
-    () async {
-      final repository = MemoryPoiRepository()
-        ..points.add(
-          const PointOfInterest(
-            id: 'church',
-            regionId: 'region',
-            name: 'Neighborhood Church',
-            coordinates: Coordinates(35.1, -89.6),
-            category: 'religion',
-            subcategory: 'church',
-            address: '',
-          ),
-        );
-      final privateData = MemoryPrivateDataStore();
-      final tracker = VisitTracker(
-        UnusedLocationService(),
-        repository,
-        privateData,
-        minimumDwell: const Duration(minutes: 2),
+  test('does not turn a drive-by into a visit on a later departure', () async {
+    final repository = MemoryPoiRepository()
+      ..points.add(
+        const PointOfInterest(
+          id: 'church',
+          regionId: 'region',
+          name: 'Neighborhood Church',
+          coordinates: Coordinates(35.1, -89.6),
+          category: 'religion',
+          subcategory: 'church',
+          address: '',
+        ),
       );
-      final arrived = DateTime(2026, 8, 8, 9);
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      repository,
+      privateData,
+      minimumDwell: const Duration(minutes: 2),
+    );
+    final arrived = DateTime(2026, 8, 8, 9);
 
-      await tracker.recordObservation(const Coordinates(35.1, -89.6), arrived);
-      await tracker.recordObservation(
-        const Coordinates(36, -90),
-        arrived.add(const Duration(hours: 2)),
-      );
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), arrived);
+    await tracker.recordObservation(
+      const Coordinates(36, -90),
+      arrived.add(const Duration(hours: 2)),
+    );
 
-      expect(privateData.recorded.single.id, 'church');
-    },
-  );
+    expect(privateData.recorded, isEmpty);
+  });
 }

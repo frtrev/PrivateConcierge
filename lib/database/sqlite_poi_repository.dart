@@ -46,6 +46,7 @@ class SqlitePoiRepository implements PoiRepository {
   Future<List<PointOfInterest>> nearby(
     Coordinates origin, {
     String? category,
+    String? query,
     double radiusMeters = 15000,
   }) async {
     final rows = await _db.query(
@@ -73,7 +74,14 @@ class SqlitePoiRepository implements PoiRepository {
                 distanceMeters(origin, point.coordinates),
               );
             })
-            .where((point) => point.distanceMeters! <= radiusMeters)
+            .where((point) {
+              if (point.distanceMeters! > radiusMeters) return false;
+              final normalized = query?.trim().toLowerCase() ?? '';
+              if (normalized.isEmpty) return true;
+              return point.name.toLowerCase().contains(normalized) ||
+                  point.address.toLowerCase().contains(normalized) ||
+                  point.subcategory.toLowerCase().contains(normalized);
+            })
             .toList()
           ..sort((a, b) => a.distanceMeters!.compareTo(b.distanceMeters!));
     return result;
