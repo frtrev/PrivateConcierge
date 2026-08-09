@@ -26,8 +26,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       widget.dependencies.visitTracker.start();
-    } else {
-      widget.dependencies.visitTracker.stop();
     }
   }
 
@@ -146,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               MaterialPageRoute(
                 builder: (_) => MostVisitedScreen(
                   privateData: widget.dependencies.privateData,
+                  visitTracker: widget.dependencies.visitTracker,
                 ),
               ),
             ),

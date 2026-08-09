@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../core/models/geo.dart';
+import '../../core/models/poi.dart';
 import '../../repositories/poi_repository.dart';
 import '../location/location_service.dart';
 import '../storage/private_data_store.dart';
@@ -25,21 +26,50 @@ class VisitTracker {
   final Duration pollInterval;
 
   Timer? _timer;
+  StreamSubscription<Coordinates>? _locationSubscription;
   String? _candidateId;
+  PointOfInterest? _candidate;
   DateTime? _candidateSince;
   bool _recordedCandidate = false;
   bool _observing = false;
 
   void start() {
-    if (_timer != null) return;
+    if (_timer != null || _locationSubscription != null) return;
+    unawaited(_startLocationUpdates());
+  }
+
+  Future<void> _startLocationUpdates() async {
+    final background = await _locationService.hasBackgroundPermission();
+    _locationSubscription = _locationService
+        .locationUpdates(background: background)
+        .listen(
+          (coordinates) =>
+              unawaited(recordObservation(coordinates, DateTime.now())),
+          onError: (Object error) {
+            if (kDebugMode) debugPrint('Visit location stream skipped: $error');
+          },
+        );
     unawaited(_poll());
     _timer = Timer.periodic(pollInterval, (_) => unawaited(_poll()));
   }
 
-  void stop() {
+  Future<bool> enableBackgroundTracking() async {
+    final granted = await _locationService.requestBackgroundPermission();
+    if (!granted) return false;
+    stop(resetCandidate: false);
+    start();
+    return true;
+  }
+
+  Future<bool> get backgroundTrackingEnabled =>
+      _locationService.hasBackgroundPermission();
+
+  void stop({bool resetCandidate = true}) {
     _timer?.cancel();
     _timer = null;
-    _resetCandidate();
+    unawaited(_locationSubscription?.cancel());
+    _locationSubscription = null;
+    if (resetCandidate) _resetCandidate();
   }
 
   Future<void> _poll() async {
@@ -62,6 +92,13 @@ class VisitTracker {
 
   @visibleForTesting
   Future<void> recordObservation(Coordinates coordinates, DateTime at) async {
+    if (!_recordedCandidate &&
+        _candidate != null &&
+        _candidateSince != null &&
+        at.difference(_candidateSince!) >= minimumDwell) {
+      await _privateDataStore.recordVisit(_candidate!, at);
+      _recordedCandidate = true;
+    }
     final custom = await _privateDataStore.customPlacesNear(
       coordinates,
       radiusMeters: visitRadiusMeters,
@@ -79,6 +116,7 @@ class VisitTracker {
     final candidate = nearby.first;
     if (_candidateId != candidate.id) {
       _candidateId = candidate.id;
+      _candidate = candidate;
       _candidateSince = at;
       _recordedCandidate = false;
       return;
@@ -92,6 +130,7 @@ class VisitTracker {
 
   void _resetCandidate() {
     _candidateId = null;
+    _candidate = null;
     _candidateSince = null;
     _recordedCandidate = false;
   }

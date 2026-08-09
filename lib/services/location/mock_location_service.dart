@@ -12,4 +12,11 @@ class MockLocationService implements LocationService {
   @override
   Future<LocationPermissionState> requestWhenInUsePermission() async =>
       LocationPermissionState.granted;
+  @override
+  Future<bool> hasBackgroundPermission() async => true;
+  @override
+  Future<bool> requestBackgroundPermission() async => true;
+  @override
+  Stream<Coordinates> locationUpdates({required bool background}) =>
+      Stream.value(coordinates);
 }

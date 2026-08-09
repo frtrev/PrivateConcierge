@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location selects offline coverage and recognizes nearby public or private places entirely on this device.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow background location so Private Concierge can recognize visits while you are away from the app. Coordinates and visit history stay only on this device.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The microphone lets you speak privately to your on-device assistant.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
@@ -55,6 +57,10 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
