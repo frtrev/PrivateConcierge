@@ -6,6 +6,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var speechHandler: IosOnDeviceSpeechHandler?
+  private var navigationChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -22,6 +23,31 @@ import UIKit
     speechHandler = IosOnDeviceSpeechHandler(
       messenger: registrar.messenger()
     )
+    navigationChannel = FlutterMethodChannel(
+      name: "charon/navigation",
+      binaryMessenger: registrar.messenger()
+    )
+    navigationChannel?.setMethodCallHandler { call, result in
+      guard call.method == "navigate",
+        let arguments = call.arguments as? [String: Any],
+        let latitude = arguments["latitude"] as? Double,
+        let longitude = arguments["longitude"] as? Double
+      else {
+        result(call.method == "navigate" ? false : FlutterMethodNotImplemented)
+        return
+      }
+      let name = arguments["name"] as? String ?? "Destination"
+      var components = URLComponents(string: "http://maps.apple.com/")
+      components?.queryItems = [
+        URLQueryItem(name: "daddr", value: "\(latitude),\(longitude)"),
+        URLQueryItem(name: "q", value: name),
+      ]
+      guard let url = components?.url else {
+        result(false)
+        return
+      }
+      UIApplication.shared.open(url, options: [:]) { opened in result(opened) }
+    }
   }
 }
 

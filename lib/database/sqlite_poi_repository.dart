@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -49,10 +51,28 @@ class SqlitePoiRepository implements PoiRepository {
     String? query,
     double radiusMeters = 15000,
   }) async {
+    final latitudeDelta = radiusMeters / 111320;
+    final longitudeScale = math.cos(origin.latitude * math.pi / 180).abs();
+    final longitudeDelta =
+        radiusMeters / (111320 * math.max(longitudeScale, .01));
+    final clauses = <String>[
+      'latitude BETWEEN ? AND ?',
+      'longitude BETWEEN ? AND ?',
+    ];
+    final arguments = <Object?>[
+      origin.latitude - latitudeDelta,
+      origin.latitude + latitudeDelta,
+      origin.longitude - longitudeDelta,
+      origin.longitude + longitudeDelta,
+    ];
+    if (category != null) {
+      clauses.add('category = ?');
+      arguments.add(category);
+    }
     final rows = await _db.query(
       'poi',
-      where: category == null ? null : 'category = ?',
-      whereArgs: category == null ? null : [category],
+      where: clauses.join(' AND '),
+      whereArgs: arguments,
     );
     final result =
         rows

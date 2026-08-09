@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../app/app_dependencies.dart';
 import '../../core/models/assistant_command.dart';
+import '../../core/models/local_query.dart';
 import '../../core/models/poi.dart';
 import '../../services/voice/voice_recognition_service.dart';
 
@@ -12,6 +13,7 @@ class VoiceAssistantScreen extends StatefulWidget {
 }
 
 class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
+  final textController = TextEditingController();
   VoiceRecognitionState state = VoiceRecognitionState.idle;
   String transcript = '';
   String response =
@@ -36,6 +38,28 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   }
 
   Future<void> _execute(String text) async {
+    if (text.trim().isEmpty) return;
+    setState(() {
+      transcript = text.trim();
+      state = VoiceRecognitionState.processing;
+    });
+    final answer = await widget.dependencies.queryEngine.answer(
+      text,
+      origin: widget.dependencies.bootstrap.coordinates,
+    );
+    if (answer.plan.intent != LocalQueryIntent.unknown) {
+      response = answer.text;
+      if (answer.result.navigationRequested &&
+          answer.result.selectedPoi != null) {
+        final opened = await widget.dependencies.navigation.navigateTo(
+          answer.result.selectedPoi!,
+        );
+        if (!opened) response = 'I could not open the maps app. ${answer.text}';
+      }
+      response = _personalize(response);
+      if (mounted) setState(() => state = VoiceRecognitionState.completed);
+      return;
+    }
     final command = widget.dependencies.commands.interpret(text);
     switch (command.intent) {
       case AssistantIntent.currentLocation:
@@ -85,6 +109,18 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
 
   String _describe(List<PointOfInterest> points) =>
       'Nearby: ${points.take(3).map((p) => '${p.name}, ${(p.distanceMeters! / 1609.344).toStringAsFixed(1)} miles').join('; ')}.';
+
+  @override
+  void dispose() {
+    textController.dispose();
+    super.dispose();
+  }
+
+  void _submitText(String value) {
+    textController.clear();
+    _execute(value);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Assistant')),
@@ -119,9 +155,29 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
               ],
             ),
           ),
+          TextField(
+            controller: textController,
+            textInputAction: TextInputAction.send,
+            enabled:
+                state != VoiceRecognitionState.listening &&
+                state != VoiceRecognitionState.processing,
+            decoration: InputDecoration(
+              hintText: 'Ask about nearby places',
+              prefixIcon: const Icon(Icons.chat_bubble_outline),
+              suffixIcon: IconButton(
+                tooltip: 'Send',
+                icon: const Icon(Icons.send),
+                onPressed: () => _submitText(textController.text),
+              ),
+            ),
+            onSubmitted: _submitText,
+          ),
+          const SizedBox(height: 16),
           Text(
             state == VoiceRecognitionState.listening
                 ? 'Listening…'
+                : state == VoiceRecognitionState.processing
+                ? 'Searching on this phone…'
                 : 'Push to talk',
           ),
           const SizedBox(height: 12),

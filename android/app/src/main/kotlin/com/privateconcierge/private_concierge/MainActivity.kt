@@ -2,6 +2,7 @@ package com.privateconcierge.private_concierge
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
@@ -15,6 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val channelName = "private_concierge/on_device_speech"
+    private val navigationChannelName = "charon/navigation"
     private val speechRequest = 7001
     private var pendingResult: MethodChannel.Result? = null
     private var recognizer: SpeechRecognizer? = null
@@ -26,6 +28,26 @@ class MainActivity : FlutterActivity() {
                 "isAvailable" -> result.success(isOnDeviceRecognitionAvailable())
                 "listenOnce" -> startOnDeviceRecognition(result)
                 else -> result.notImplemented()
+            }
+        }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, navigationChannelName).setMethodCallHandler { call, result ->
+            if (call.method != "navigate") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val latitude = call.argument<Double>("latitude")
+            val longitude = call.argument<Double>("longitude")
+            val name = call.argument<String>("name") ?: "Destination"
+            if (latitude == null || longitude == null) {
+                result.success(false)
+                return@setMethodCallHandler
+            }
+            val uri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude(${Uri.encode(name)})")
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+            if (intent.resolveActivity(packageManager) == null) result.success(false)
+            else {
+                startActivity(intent)
+                result.success(true)
             }
         }
     }
