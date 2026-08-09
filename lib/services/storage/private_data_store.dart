@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 import '../../core/models/geo.dart';
 import '../../core/models/poi.dart';
 import '../../core/models/visited_place.dart';
+import '../../core/models/unknown_place_candidate.dart';
 
 abstract interface class PrivateDataStore {
   Future<void> open();
@@ -25,6 +26,10 @@ abstract interface class PrivateDataStore {
   Future<List<VisitedPlace>> mostVisited();
   Future<void> deleteVisitHistory();
   Future<void> deleteEverything();
+  Future<void> recordUnknownStay(Coordinates coordinates, DateTime visitedAt);
+  Future<UnknownPlaceCandidate?> pendingUnknownSuggestion();
+  Future<void> dismissUnknownSuggestion(int id);
+  Future<void> resolveUnknownSuggestion(int id);
 }
 
 class SqlitePrivateDataStore implements PrivateDataStore {
@@ -34,13 +39,14 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
         );
         await _createVisitsTable(db);
         await _createCustomPlacesTable(db);
+        await _createUnknownStaysTable(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createVisitsTable(db);
@@ -48,6 +54,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
         if (oldVersion >= 3 && oldVersion < 4) {
           await _migrateCustomPlacesToV4(db);
         }
+        if (oldVersion < 5) await _createUnknownStaysTable(db);
       },
     );
   }
@@ -246,6 +253,108 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     await _database?.delete('private_values');
     await deleteVisitHistory();
     await deleteCustomPlaces();
+    await _database?.delete('unknown_stays');
+  }
+
+  @override
+  Future<void> recordUnknownStay(
+    Coordinates coordinates,
+    DateTime visitedAt,
+  ) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final rows = await db.query('unknown_stays');
+    Map<String, Object?>? match;
+    var closest = double.infinity;
+    for (final row in rows) {
+      final distance = distanceMeters(
+        coordinates,
+        Coordinates(row['latitude']! as double, row['longitude']! as double),
+      );
+      if (distance <= 60 && distance < closest) {
+        closest = distance;
+        match = row;
+      }
+    }
+    final timestamp = visitedAt.millisecondsSinceEpoch;
+    if (match == null) {
+      await db.insert('unknown_stays', {
+        'latitude': coordinates.latitude,
+        'longitude': coordinates.longitude,
+        'visit_count': 1,
+        'first_visited_ms': timestamp,
+        'last_visited_ms': timestamp,
+        'dismissed': 0,
+      });
+      return;
+    }
+    final count = match['visit_count']! as int;
+    final lastVisited = match['last_visited_ms']! as int;
+    if (timestamp - lastVisited < const Duration(hours: 4).inMilliseconds) {
+      await db.update(
+        'unknown_stays',
+        {'last_visited_ms': timestamp},
+        where: 'id = ?',
+        whereArgs: [match['id']],
+      );
+      return;
+    }
+    await db.update(
+      'unknown_stays',
+      {
+        'latitude':
+            (((match['latitude']! as double) * count) + coordinates.latitude) /
+            (count + 1),
+        'longitude':
+            (((match['longitude']! as double) * count) +
+                coordinates.longitude) /
+            (count + 1),
+        'visit_count': count + 1,
+        'last_visited_ms': timestamp,
+      },
+      where: 'id = ?',
+      whereArgs: [match['id']],
+    );
+  }
+
+  @override
+  Future<UnknownPlaceCandidate?> pendingUnknownSuggestion() async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final rows = await db.query(
+      'unknown_stays',
+      where: 'visit_count >= 3 AND dismissed = 0',
+      orderBy: 'last_visited_ms DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    return UnknownPlaceCandidate(
+      id: row['id']! as int,
+      coordinates: Coordinates(
+        row['latitude']! as double,
+        row['longitude']! as double,
+      ),
+      visitCount: row['visit_count']! as int,
+      lastVisited: DateTime.fromMillisecondsSinceEpoch(
+        row['last_visited_ms']! as int,
+      ),
+    );
+  }
+
+  @override
+  Future<void> dismissUnknownSuggestion(int id) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.update(
+      'unknown_stays',
+      {'dismissed': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  @override
+  Future<void> resolveUnknownSuggestion(int id) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.delete('unknown_stays', where: 'id = ?', whereArgs: [id]);
   }
 
   static Future<void> _createVisitsTable(Database db) => db.execute(
@@ -254,6 +363,10 @@ class SqlitePrivateDataStore implements PrivateDataStore {
 
   static Future<void> _createCustomPlacesTable(Database db) => db.execute(
     'CREATE TABLE custom_places (id TEXT PRIMARY KEY, place_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tag TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, created_ms INTEGER NOT NULL)',
+  );
+
+  static Future<void> _createUnknownStaysTable(Database db) => db.execute(
+    'CREATE TABLE unknown_stays (id INTEGER PRIMARY KEY AUTOINCREMENT, latitude REAL NOT NULL, longitude REAL NOT NULL, visit_count INTEGER NOT NULL, first_visited_ms INTEGER NOT NULL, last_visited_ms INTEGER NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0)',
   );
 
   static Future<void> _migrateCustomPlacesToV4(Database db) async {

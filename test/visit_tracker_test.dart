@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:private_concierge/core/models/geo.dart';
 import 'package:private_concierge/core/models/poi.dart';
 import 'package:private_concierge/core/models/visited_place.dart';
+import 'package:private_concierge/core/models/unknown_place_candidate.dart';
 import 'package:private_concierge/services/location/location_service.dart';
 import 'package:private_concierge/services/storage/private_data_store.dart';
 import 'package:private_concierge/services/visits/visit_tracker.dart';
@@ -29,6 +30,7 @@ class UnusedLocationService implements LocationService {
 class MemoryPrivateDataStore implements PrivateDataStore {
   final recorded = <PointOfInterest>[];
   final custom = <PointOfInterest>[];
+  final unknownStays = <Coordinates>[];
   @override
   Future<void> open() async {}
   @override
@@ -80,6 +82,17 @@ class MemoryPrivateDataStore implements PrivateDataStore {
   Future<void> deleteVisitHistory() async => recorded.clear();
   @override
   Future<void> deleteEverything() async => recorded.clear();
+  @override
+  Future<void> recordUnknownStay(
+    Coordinates coordinates,
+    DateTime visitedAt,
+  ) async => unknownStays.add(coordinates);
+  @override
+  Future<UnknownPlaceCandidate?> pendingUnknownSuggestion() async => null;
+  @override
+  Future<void> dismissUnknownSuggestion(int id) async {}
+  @override
+  Future<void> resolveUnknownSuggestion(int id) async {}
 }
 
 void main() {
@@ -185,6 +198,40 @@ void main() {
       arrived.add(const Duration(hours: 2)),
     );
 
+    expect(privateData.recorded, isEmpty);
+  });
+
+  test('records one qualifying unknown stay without guessing a POI', () async {
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      MemoryPoiRepository(),
+      privateData,
+      minimumDwell: const Duration(minutes: 2),
+      minimumObservations: 3,
+    );
+    final arrived = DateTime(2026, 8, 8, 18);
+    const location = Coordinates(35.047, -89.71);
+
+    await tracker.recordObservation(location, arrived);
+    await tracker.recordObservation(
+      location,
+      arrived.add(const Duration(minutes: 1)),
+    );
+    await tracker.recordObservation(
+      location,
+      arrived.add(const Duration(minutes: 2)),
+    );
+    await tracker.recordObservation(
+      location,
+      arrived.add(const Duration(minutes: 3)),
+    );
+
+    expect(privateData.unknownStays, hasLength(1));
+    expect(
+      distanceMeters(privateData.unknownStays.single, location),
+      lessThan(1),
+    );
     expect(privateData.recorded, isEmpty);
   });
 }

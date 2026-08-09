@@ -6,6 +6,8 @@ import '../voice_assistant/voice_assistant_screen.dart';
 import '../visits/most_visited_screen.dart';
 import '../visits/my_places_screen.dart';
 import '../../services/geography/region_resolver.dart';
+import '../../services/storage/private_data_store.dart';
+import '../../core/models/unknown_place_candidate.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.dependencies});
@@ -15,17 +17,152 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  int? _promptedUnknownId;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.dependencies.visitTracker.start();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _suggestUnknownPlace());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       widget.dependencies.visitTracker.start();
+      _suggestUnknownPlace();
+    }
+  }
+
+  Future<void> _suggestUnknownPlace() async {
+    if (!mounted) return;
+    final candidate = await widget.dependencies.privateData
+        .pendingUnknownSuggestion();
+    if (!mounted || candidate == null || candidate.id == _promptedUnknownId) {
+      return;
+    }
+    _promptedUnknownId = candidate.id;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.add_location_alt_outlined),
+        title: const Text('A place you visit often'),
+        content: Text(
+          'You have stayed at the same unknown place ${candidate.visitCount} times. Would you like to add it to your private places?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'dismiss'),
+            child: const Text('Don’t ask again'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'later'),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, 'add'),
+            child: const Text('Add place'),
+          ),
+        ],
+      ),
+    );
+    if (result == 'dismiss') {
+      await widget.dependencies.privateData.dismissUnknownSuggestion(
+        candidate.id,
+      );
+    } else if (result == 'add' && mounted) {
+      await _nameUnknownPlace(candidate);
+    }
+  }
+
+  Future<void> _nameUnknownPlace(UnknownPlaceCandidate candidate) async {
+    final controller = TextEditingController();
+    var category = 'other';
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add private place'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Place name',
+                  hintText: 'For example, Tony’s Trophy Room',
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: category,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'restaurant',
+                    child: Text('Restaurant'),
+                  ),
+                  DropdownMenuItem(value: 'work', child: Text('Work')),
+                  DropdownMenuItem(value: 'home', child: Text('Home')),
+                  DropdownMenuItem(value: 'shop', child: Text('Shop')),
+                  DropdownMenuItem(
+                    value: 'recreation',
+                    child: Text('Recreation'),
+                  ),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => category = value ?? 'other'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (controller.text.trim().isNotEmpty) {
+                  Navigator.pop(context, true);
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final name = controller.text.trim();
+    controller.dispose();
+    if (saved != true || name.isEmpty) return;
+    try {
+      await widget.dependencies.privateData.saveCustomPlace(
+        name: name,
+        tag: category,
+        coordinates: candidate.coordinates,
+      );
+      await widget.dependencies.privateData.resolveUnknownSuggestion(
+        candidate.id,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$name added to your private places.')),
+        );
+      }
+    } on CustomPlaceConflictException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'That private place already exists. Use another name.',
+            ),
+          ),
+        );
+      }
     }
   }
 

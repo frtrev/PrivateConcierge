@@ -34,6 +34,7 @@ class VisitTracker {
   DateTime? _candidateSince;
   bool _recordedCandidate = false;
   int _candidateObservations = 0;
+  Coordinates? _unknownCenter;
   bool _observing = false;
 
   void start() {
@@ -106,18 +107,19 @@ class VisitTracker {
             radiusMeters: visitRadiusMeters,
           );
     if (nearby.isEmpty) {
-      _resetCandidate();
+      await _recordUnknownObservation(coordinates, at);
       return;
     }
     if (nearby.length > 1 &&
         nearby[1].distanceMeters! - nearby[0].distanceMeters! <
             ambiguityMarginMeters) {
-      _resetCandidate();
+      await _recordUnknownObservation(coordinates, at);
       return;
     }
     final candidate = nearby.first;
     if (_candidateId != candidate.id) {
       _candidateId = candidate.id;
+      _unknownCenter = null;
       _candidateSince = at;
       _candidateObservations = 1;
       _recordedCandidate = false;
@@ -133,10 +135,43 @@ class VisitTracker {
     _recordedCandidate = true;
   }
 
+  Future<void> _recordUnknownObservation(
+    Coordinates coordinates,
+    DateTime at,
+  ) async {
+    final sameCluster =
+        _candidateId == 'unknown' &&
+        _unknownCenter != null &&
+        distanceMeters(_unknownCenter!, coordinates) <= 60;
+    if (!sameCluster) {
+      _candidateId = 'unknown';
+      _unknownCenter = coordinates;
+      _candidateSince = at;
+      _candidateObservations = 1;
+      _recordedCandidate = false;
+      return;
+    }
+    _candidateObservations++;
+    final count = _candidateObservations;
+    _unknownCenter = Coordinates(
+      ((_unknownCenter!.latitude * (count - 1)) + coordinates.latitude) / count,
+      ((_unknownCenter!.longitude * (count - 1)) + coordinates.longitude) /
+          count,
+    );
+    if (_recordedCandidate ||
+        count < minimumObservations ||
+        at.difference(_candidateSince!) < minimumDwell) {
+      return;
+    }
+    await _privateDataStore.recordUnknownStay(_unknownCenter!, at);
+    _recordedCandidate = true;
+  }
+
   void _resetCandidate() {
     _candidateId = null;
     _candidateSince = null;
     _candidateObservations = 0;
+    _unknownCenter = null;
     _recordedCandidate = false;
   }
 }
