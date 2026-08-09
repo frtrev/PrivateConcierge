@@ -8,6 +8,7 @@ import '../visits/my_places_screen.dart';
 import '../../services/geography/region_resolver.dart';
 import '../../services/storage/private_data_store.dart';
 import '../../core/models/unknown_place_candidate.dart';
+import '../../core/models/region.dart';
 import '../routines/routines_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -167,6 +168,206 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _showHomeAreaDialog({Region? initial}) async {
+    final coordinates = widget.dependencies.bootstrap.coordinates;
+    if (coordinates == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Current location is unavailable, so a home area cannot be identified.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    final options = downloadOptionsFor(coordinates);
+    if (options.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Offline home-area packages are not available for this city yet.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    final installed = <String, bool>{};
+    for (final option in options) {
+      installed[option.id] = await widget.dependencies.packages.isCurrent(
+        option,
+      );
+    }
+    if (!mounted) return;
+    Region? installedSelection;
+    for (final option in options) {
+      if (installed[option.id] == true) {
+        installedSelection = option;
+        break;
+      }
+    }
+    var selected =
+        initial ??
+        installedSelection ??
+        options.firstWhere(
+          (option) => option.coverageMiles == 50,
+          orElse: () => options.first,
+        );
+    var installing = false;
+    var progress = 0.0;
+    String? progressText;
+    String? errorText;
+    final completed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final alreadyInstalled = installed[selected.id] == true;
+          return AlertDialog(
+            icon: const Icon(Icons.home_work_outlined, size: 40),
+            title: Text('${selected.displayName} home area'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Your city was identified from this device’s location. Choose how far offline place search should extend from home.',
+                ),
+                const SizedBox(height: 18),
+                SegmentedButton<int>(
+                  segments: [
+                    for (final option in options)
+                      ButtonSegment(
+                        value: option.coverageMiles,
+                        label: Text('${option.coverageMiles} mi'),
+                      ),
+                  ],
+                  selected: {selected.coverageMiles},
+                  onSelectionChanged: installing
+                      ? null
+                      : (values) => setDialogState(() {
+                          selected = options.firstWhere(
+                            (option) => option.coverageMiles == values.single,
+                          );
+                          errorText = null;
+                        }),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '${_formatBytes(selected.approximateBytes)} compressed • approximately ${selected.approximatePoiCount ?? 0} places',
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  alreadyInstalled
+                      ? 'This home area is already installed. Update will force a fresh verified package download and replace its local POIs.'
+                      : installed.values.any((value) => value)
+                      ? 'Changing coverage replaces the currently installed home-area package.'
+                      : selected.coverageMiles == 50
+                      ? 'Recommended default: broad local coverage with a small download.'
+                      : 'Larger coverage takes more storage and installation time.',
+                ),
+                if (installing) ...[
+                  const SizedBox(height: 18),
+                  LinearProgressIndicator(value: progress),
+                  const SizedBox(height: 8),
+                  Text(progressText ?? 'Preparing offline places…'),
+                ],
+                if (errorText != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    errorText!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: installing
+                    ? null
+                    : () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: installing
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          installing = true;
+                          errorText = null;
+                        });
+                        try {
+                          await for (final update
+                              in widget.dependencies.packages.install(
+                                selected,
+                              )) {
+                            if (!dialogContext.mounted) return;
+                            setDialogState(() {
+                              progress = update.fraction;
+                              progressText = update.message;
+                            });
+                          }
+                          widget.dependencies.bootstrap.selectInstalledRegion(
+                            selected,
+                          );
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext, true);
+                          }
+                        } catch (error) {
+                          if (!dialogContext.mounted) return;
+                          setDialogState(() {
+                            installing = false;
+                            errorText = '$error';
+                          });
+                        }
+                      },
+                icon: Icon(
+                  alreadyInstalled ? Icons.refresh : Icons.download_outlined,
+                ),
+                label: Text(alreadyInstalled ? 'Update' : 'Install'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (completed == true && mounted) setState(() {});
+  }
+
+  Future<void> _confirmRemoveRegion(Region region) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove offline home area?'),
+        content: Text(
+          '${region.displayName} ${region.coverageMiles}-mile offline POIs will be removed. Private visits and custom places are not affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.dependencies.packages.delete(region);
+    if (mounted) setState(() {});
+  }
+
+  String _formatBytes(int bytes) => bytes < 1024 * 1024
+      ? '${(bytes / 1024).ceil()} KB'
+      : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -234,11 +435,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    region == null
-                        ? 'Choose a downloaded region to use nearby search.'
-                        : 'Downloaded • ${region.coverageMiles}-mile coverage',
-                  ),
+                  if (region == null)
+                    const Text(
+                      'No supported home area was detected at this location.',
+                    )
+                  else
+                    FutureBuilder<bool>(
+                      future: widget.dependencies.packages.isCurrent(region),
+                      builder: (context, snapshot) => Text(
+                        snapshot.data == true
+                            ? 'Home area installed • ${region.coverageMiles}-mile coverage'
+                            : 'Home area detected • Offline places not installed',
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -333,10 +542,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     .map(
                       (r) => ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.download_done),
+                        leading: Icon(
+                          region?.id == r.id
+                              ? Icons.radio_button_checked
+                              : Icons.download_done,
+                        ),
                         title: Text(r.displayName),
                         subtitle: Text(
                           'Overture Maps • ${r.coverageMiles} miles • version ${r.installedVersion}',
+                        ),
+                        onTap: () => setState(
+                          () => widget.dependencies.bootstrap
+                              .selectInstalledRegion(r),
+                        ),
+                        trailing: PopupMenuButton<String>(
+                          tooltip: 'Region actions',
+                          onSelected: (action) async {
+                            if (action == 'select') {
+                              setState(
+                                () => widget.dependencies.bootstrap
+                                    .selectInstalledRegion(r),
+                              );
+                            } else if (action == 'update') {
+                              await _showHomeAreaDialog(initial: r);
+                            } else if (action == 'remove') {
+                              await _confirmRemoveRegion(r);
+                            }
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'select',
+                              child: Text('Use this coverage'),
+                            ),
+                            PopupMenuItem(
+                              value: 'update',
+                              child: Text('Update / reinstall'),
+                            ),
+                            PopupMenuItem(
+                              value: 'remove',
+                              child: Text('Remove offline data'),
+                            ),
+                          ],
                         ),
                       ),
                     )
@@ -346,36 +592,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           OutlinedButton.icon(
             icon: const Icon(Icons.map_outlined),
-            label: const Text('Download an offline region'),
-            onPressed: () => showModalBottomSheet<void>(
-              context: context,
-              showDragHandle: true,
-              builder: (sheetContext) => ListView(
-                shrinkWrap: true,
-                children: [
-                  const ListTile(
-                    title: Text('Overture Maps regions'),
-                    subtitle: Text(
-                      'Downloads a verified static Places package. Choosing a region also uses its center as the development location.',
-                    ),
-                  ),
-                  for (final candidate in bundledRegions)
-                    ListTile(
-                      leading: const Icon(Icons.location_city),
-                      title: Text(
-                        '${candidate.displayName} • ${candidate.coverageMiles} miles',
-                      ),
-                      onTap: () async {
-                        await widget.dependencies.bootstrap
-                            .selectDevelopmentRegion(candidate);
-                        if (!sheetContext.mounted) return;
-                        Navigator.pop(sheetContext);
-                        setState(() {});
-                      },
-                    ),
-                ],
-              ),
-            ),
+            label: const Text('Install or update home area'),
+            onPressed: _showHomeAreaDialog,
           ),
         ],
       ),

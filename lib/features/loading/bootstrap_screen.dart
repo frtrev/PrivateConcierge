@@ -49,7 +49,7 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
   Future<void> _showRegionDownload(List<Region> options) async {
     dialogOpen = true;
     var selected = options.firstWhere(
-      (option) => option.coverageMiles == 25,
+      (option) => option.coverageMiles == 50,
       orElse: () => options.first,
     );
     await showDialog<void>(
@@ -91,7 +91,7 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                selected.coverageMiles == 25
+                selected.coverageMiles == 50
                     ? 'Recommended for a faster first setup.'
                     : 'Broader coverage takes more storage and longer to install.',
                 style: Theme.of(context).textTheme.bodySmall,

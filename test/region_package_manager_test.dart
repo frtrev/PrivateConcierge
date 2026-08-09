@@ -22,7 +22,7 @@ void main() {
   test('installs a verified package and records its version', () async {
     SharedPreferences.setMockInitialValues({});
     final data = await rootBundle.load(
-      'assets/overture/us-tn-memphis.jsonl.gz',
+      'assets/overture/us-tn-memphis-50mi.jsonl.gz',
     );
     final bytes = data.buffer.asUint8List(
       data.offsetInBytes,
@@ -37,7 +37,7 @@ void main() {
     final updates = await manager.install(bundledRegions.first).toList();
     expect(updates.last.fraction, 1);
     expect(await manager.isCurrent(bundledRegions.first), isTrue);
-    expect(repository.points.length, 8180);
+    expect(repository.points.length, 12448);
     expect(
       (await manager.installedRegions()).single.id,
       bundledRegions.first.id,

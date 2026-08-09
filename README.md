@@ -32,7 +32,7 @@ Use mock Memphis GPS without device location:
 flutter run --dart-define=USE_MOCK_LOCATION=true
 ```
 
-Memphis, Nashville, and Dallas can also be selected from **Download an offline region** on the home screen. First-time Memphis setup offers a 25-mile package by default or optional 50-mile coverage. Each installs thousands of real Overture places into the local SQLite database.
+The phone identifies the supported home city from its location. Memphis setup defaults to 50-mile coverage, with genuine 100- and 150-mile Overture packages available from **Install or update home area**. One verified home-area package is installed in the local SQLite database at a time.
 
 ## Refresh Overture packages
 

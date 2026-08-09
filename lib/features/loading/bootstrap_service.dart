@@ -51,16 +51,17 @@ class BootstrapService {
     return coordinates!;
   }
 
-  Future<void> selectDevelopmentRegion(Region selected) async {
+  Future<void> installHomeRegion(
+    Region selected, {
+    bool forceUpdate = false,
+  }) async {
     region = selected;
-    coordinates = Coordinates(
-      (selected.bounds.south + selected.bounds.north) / 2,
-      (selected.bounds.west + selected.bounds.east) / 2,
-    );
-    if (!await packageManager.isCurrent(selected)) {
+    if (forceUpdate || !await packageManager.isCurrent(selected)) {
       await packageManager.install(selected).drain<void>();
     }
   }
+
+  void selectInstalledRegion(Region selected) => region = selected;
 
   Stream<BootstrapUpdate> run({
     bool requestLocation = false,
@@ -76,6 +77,7 @@ class BootstrapService {
         status: 'Opening public geographic database',
       );
       await poiRepository.open();
+      await packageManager.removeLegacyRegions();
       yield const BootstrapUpdate(
         progress: .20,
         status: 'Opening private on-device storage',

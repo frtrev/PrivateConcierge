@@ -20,25 +20,6 @@ class BundledRegionResolver implements RegionResolver {
 
 final bundledRegions = <Region>[
   Region(
-    id: 'us-tn-memphis',
-    name: 'Memphis',
-    administrativeArea: 'Tennessee',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 34.738,
-      west: -90.042,
-      north: 35.462,
-      east: -89.158,
-    ),
-    version: 20260809,
-    downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tn-memphis.jsonl.gz',
-    ),
-    approximateBytes: 443716,
-    coverageMiles: 25,
-    approximatePoiCount: 8180,
-  ),
-  Region(
     id: 'us-tn-memphis-50mi',
     name: 'Memphis',
     administrativeArea: 'Tennessee',
@@ -58,40 +39,46 @@ final bundledRegions = <Region>[
     approximatePoiCount: 12448,
   ),
   Region(
-    id: 'us-tn-nashville',
-    name: 'Nashville',
+    id: 'us-tn-memphis-100mi',
+    name: 'Memphis',
     administrativeArea: 'Tennessee',
     country: 'US',
     bounds: const GeoBounds(
-      south: 35.90,
-      west: -87.10,
-      north: 36.42,
-      east: -86.50,
+      south: 33.70,
+      west: -91.67,
+      north: 36.60,
+      east: -88.13,
     ),
-    version: 20260715,
+    version: 20260809,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tn-nashville.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/201e2b63a234f004fb2b0c04778011459ccbb276/assets/overture/us-tn-memphis-100mi.jsonl.gz',
     ),
-    approximateBytes: 568262,
+    approximateBytes: 1324428,
+    coverageMiles: 100,
+    approximatePoiCount: 24219,
   ),
   Region(
-    id: 'us-tx-dallas',
-    name: 'Dallas',
-    administrativeArea: 'Texas',
+    id: 'us-tn-memphis-150mi',
+    name: 'Memphis',
+    administrativeArea: 'Tennessee',
     country: 'US',
     bounds: const GeoBounds(
-      south: 32.55,
-      west: -97.10,
-      north: 33.10,
-      east: -96.45,
+      south: 32.98,
+      west: -92.56,
+      north: 37.32,
+      east: -87.24,
     ),
-    version: 20260715,
+    version: 20260809,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tx-dallas.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/201e2b63a234f004fb2b0c04778011459ccbb276/assets/overture/us-tn-memphis-150mi.jsonl.gz',
     ),
-    approximateBytes: 1631087,
+    approximateBytes: 2494370,
+    coverageMiles: 150,
+    approximatePoiCount: 45489,
   ),
 ];
+
+const legacyRegionIds = {'us-tn-memphis', 'us-tn-nashville', 'us-tx-dallas'};
 
 List<Region> downloadOptionsFor(Coordinates coordinates) =>
     bundledRegions

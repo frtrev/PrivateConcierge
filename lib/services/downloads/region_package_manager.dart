@@ -18,6 +18,7 @@ abstract interface class RegionPackageManager {
   Stream<PackageProgress> install(Region region);
   Future<List<Region>> installedRegions();
   Future<void> delete(Region region);
+  Future<void> removeLegacyRegions();
 }
 
 class OvertureRegionPackageManager implements RegionPackageManager {
@@ -35,10 +36,10 @@ class OvertureRegionPackageManager implements RegionPackageManager {
         '7141b38fffa0a537dca276ff07912d47552a2c9cfb8e8b33ec79d1b707196927',
     'us-tn-memphis-50mi':
         'f8241a86cc90b0b1e7e170ecd4d233896f3d31a44b911f763df9fe0c4046b8cb',
-    'us-tn-nashville':
-        '4593556bf28a360b782ff062ad356f563f1f3770d8dc224f4c1e48639ed53002',
-    'us-tx-dallas':
-        'e52b4c980bea425012ce2d670c8859e4f14cb4a54cb87a3a0cae3b01efdda5da',
+    'us-tn-memphis-100mi':
+        'b075c84f51cc189312ab84e6d38944d525d34bb09204040164b3a1f5b6d98d61',
+    'us-tn-memphis-150mi':
+        'fbc20e95b1a4e855c4b93d052d048a1c9f6b08f8dad48759bb04976dfdf6df62',
   };
 
   @override
@@ -147,6 +148,21 @@ class OvertureRegionPackageManager implements RegionPackageManager {
       'public_region_source_${region.id}',
     ]) {
       await _preferences.remove(key);
+    }
+  }
+
+  @override
+  Future<void> removeLegacyRegions() async {
+    for (final id in legacyRegionIds) {
+      await _repository.deleteRegion(id);
+      for (final key in [
+        '$_prefix$id',
+        'public_region_updated_$id',
+        'public_region_poi_count_$id',
+        'public_region_source_$id',
+      ]) {
+        await _preferences.remove(key);
+      }
     }
   }
 

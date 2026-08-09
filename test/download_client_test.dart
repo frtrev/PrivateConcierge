@@ -16,14 +16,14 @@ void main() {
     final chunks = await client
         .downloadPublicResource(
           Uri.parse(
-            'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis.jsonl.gz',
+            'https://raw.githubusercontent.com/frtrev/PrivateConcierge/main/assets/overture/us-tn-memphis-50mi.jsonl.gz',
           ),
         )
         .toList();
 
     expect(chunks, hasLength(1));
-    expect(chunks.single.bytes, hasLength(443716));
-    expect(chunks.single.receivedBytes, 443716);
-    expect(chunks.single.totalBytes, 443716);
+    expect(chunks.single.bytes, hasLength(677771));
+    expect(chunks.single.receivedBytes, 677771);
+    expect(chunks.single.totalBytes, 677771);
   });
 }
