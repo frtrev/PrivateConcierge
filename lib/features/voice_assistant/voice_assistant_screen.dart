@@ -16,6 +16,13 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   String transcript = '';
   String response =
       'Tap the microphone and ask about your location or nearby places.';
+
+  @override
+  void initState() {
+    super.initState();
+    response = _personalize(response);
+  }
+
   Future<void> _listen() async {
     await for (final result in widget.dependencies.voice.listenOnce()) {
       if (!mounted) return;
@@ -60,7 +67,20 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
         response =
             'I can answer where you are, list downloaded regions, or find nearby places.';
     }
+    response = _personalize(response);
     if (mounted) setState(() => state = VoiceRecognitionState.completed);
+  }
+
+  String _personalize(String message) {
+    final profile = widget.dependencies.profileService.load();
+    if (profile == null) return message;
+    final address = profile.preferredAddress.trim();
+    final prefix = address.isEmpty ? '' : '$address, ';
+    return switch (profile.personality) {
+      'professional' => '$prefix$message',
+      'playful' => '${prefix}here’s what I found: $message',
+      _ => '${prefix}of course. $message',
+    };
   }
 
   String _describe(List<PointOfInterest> points) =>

@@ -8,6 +8,7 @@ import '../visits/my_places_screen.dart';
 import '../../services/geography/region_resolver.dart';
 import '../../services/storage/private_data_store.dart';
 import '../../core/models/unknown_place_candidate.dart';
+import '../routines/routines_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.dependencies});
@@ -254,6 +255,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               MaterialPageRoute(
                 builder: (_) =>
                     VoiceAssistantScreen(dependencies: widget.dependencies),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.auto_graph),
+            label: const Text('Learned routines'),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    RoutinesScreen(engine: widget.dependencies.routineEngine),
               ),
             ),
           ),

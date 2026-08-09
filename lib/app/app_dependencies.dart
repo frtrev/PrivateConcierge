@@ -11,6 +11,8 @@ import '../services/location/location_service.dart';
 import '../services/nearby/nearby_service.dart';
 import '../services/network/download_client.dart';
 import '../services/notifications/notification_service.dart';
+import '../services/profile/user_profile_service.dart';
+import '../services/routines/routine_engine.dart';
 import '../services/storage/private_data_store.dart';
 import '../services/voice/voice_recognition_service.dart';
 import '../services/visits/visit_tracker.dart';
@@ -26,6 +28,8 @@ class AppDependencies {
     required this.privateData,
     required this.visitTracker,
     required this.themeController,
+    required this.profileService,
+    required this.routineEngine,
   });
   final BootstrapService bootstrap;
   final RegionPackageManager packages;
@@ -35,6 +39,8 @@ class AppDependencies {
   final PrivateDataStore privateData;
   final VisitTracker visitTracker;
   final AppThemeController themeController;
+  final UserProfileService profileService;
+  final RoutineEngine routineEngine;
   static Future<AppDependencies> create() async {
     final preferences = await SharedPreferences.getInstance();
     final poi = SqlitePoiRepository();
@@ -52,14 +58,29 @@ class AppDependencies {
       ),
     );
     final voice = AndroidOnDeviceVoiceRecognitionService();
+    final notifications = LocalNotificationService();
+    final profiles = UserProfileService(preferences);
+    final routines = RoutineEngine(
+      privateData,
+      notifications,
+      profiles,
+      preferences,
+    );
     return AppDependencies._(
       packages: packages,
       nearby: NearbyService(poi),
       commands: DeterministicCommandInterpreter(),
       voice: voice,
       privateData: privateData,
-      visitTracker: VisitTracker(location, poi, privateData),
+      visitTracker: VisitTracker(
+        location,
+        poi,
+        privateData,
+        onObservation: routines.evaluate,
+      ),
       themeController: AppThemeController(preferences),
+      profileService: profiles,
+      routineEngine: routines,
       bootstrap: BootstrapService(
         poiRepository: poi,
         privateDataStore: privateData,
@@ -67,7 +88,7 @@ class AppDependencies {
         regionResolver: resolver,
         packageManager: packages,
         voiceService: voice,
-        notificationService: PlaceholderNotificationService(),
+        notificationService: notifications,
       ),
     );
   }

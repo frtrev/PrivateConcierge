@@ -17,6 +17,7 @@ class VisitTracker {
     this.pollInterval = const Duration(seconds: 30),
     this.minimumObservations = 3,
     this.ambiguityMarginMeters = 20,
+    this.onObservation,
   });
 
   final LocationService _locationService;
@@ -27,6 +28,7 @@ class VisitTracker {
   final Duration pollInterval;
   final int minimumObservations;
   final double ambiguityMarginMeters;
+  final Future<void> Function(DateTime at)? onObservation;
 
   Timer? _timer;
   StreamSubscription<Coordinates>? _locationSubscription;
@@ -35,6 +37,7 @@ class VisitTracker {
   bool _recordedCandidate = false;
   int _candidateObservations = 0;
   Coordinates? _unknownCenter;
+  int? _activeSessionId;
   bool _observing = false;
 
   void start() {
@@ -47,8 +50,15 @@ class VisitTracker {
     _locationSubscription = _locationService
         .locationUpdates(background: background)
         .listen(
-          (coordinates) =>
-              unawaited(recordObservation(coordinates, DateTime.now())),
+          (coordinates) {
+            final now = DateTime.now();
+            unawaited(
+              recordObservation(
+                coordinates,
+                now,
+              ).whenComplete(() => onObservation?.call(now)),
+            );
+          },
           onError: (Object error) {
             if (kDebugMode) debugPrint('Visit location stream skipped: $error');
           },
@@ -73,7 +83,10 @@ class VisitTracker {
     _timer = null;
     unawaited(_locationSubscription?.cancel());
     _locationSubscription = null;
-    if (resetCandidate) _resetCandidate();
+    if (resetCandidate) {
+      unawaited(_endActiveVisit(DateTime.now()));
+      _resetCandidate();
+    }
   }
 
   Future<void> _poll() async {
@@ -84,6 +97,7 @@ class VisitTracker {
         await _locationService.currentLocation(),
         DateTime.now(),
       );
+      await onObservation?.call(DateTime.now());
     } catch (error, stackTrace) {
       if (kDebugMode) {
         debugPrint('Foreground visit observation skipped: $error');
@@ -118,6 +132,7 @@ class VisitTracker {
     }
     final candidate = nearby.first;
     if (_candidateId != candidate.id) {
+      await _endActiveVisit(at);
       _candidateId = candidate.id;
       _unknownCenter = null;
       _candidateSince = at;
@@ -132,6 +147,10 @@ class VisitTracker {
       return;
     }
     await _privateDataStore.recordVisit(candidate, at);
+    _activeSessionId = await _privateDataStore.beginVisitSession(
+      candidate,
+      _candidateSince!,
+    );
     _recordedCandidate = true;
   }
 
@@ -139,6 +158,9 @@ class VisitTracker {
     Coordinates coordinates,
     DateTime at,
   ) async {
+    if (_candidateId != null && _candidateId != 'unknown') {
+      await _endActiveVisit(at);
+    }
     final sameCluster =
         _candidateId == 'unknown' &&
         _unknownCenter != null &&
@@ -165,6 +187,13 @@ class VisitTracker {
     }
     await _privateDataStore.recordUnknownStay(_unknownCenter!, at);
     _recordedCandidate = true;
+  }
+
+  Future<void> _endActiveVisit(DateTime departure) async {
+    final id = _activeSessionId;
+    if (id == null) return;
+    _activeSessionId = null;
+    await _privateDataStore.endVisitSession(id, departure);
   }
 
   void _resetCandidate() {

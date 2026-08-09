@@ -3,6 +3,7 @@ import 'package:private_concierge/core/models/geo.dart';
 import 'package:private_concierge/core/models/poi.dart';
 import 'package:private_concierge/core/models/visited_place.dart';
 import 'package:private_concierge/core/models/unknown_place_candidate.dart';
+import 'package:private_concierge/core/models/visit_session.dart';
 import 'package:private_concierge/services/location/location_service.dart';
 import 'package:private_concierge/services/storage/private_data_store.dart';
 import 'package:private_concierge/services/visits/visit_tracker.dart';
@@ -31,6 +32,7 @@ class MemoryPrivateDataStore implements PrivateDataStore {
   final recorded = <PointOfInterest>[];
   final custom = <PointOfInterest>[];
   final unknownStays = <Coordinates>[];
+  final sessions = <VisitSession>[];
   @override
   Future<void> open() async {}
   @override
@@ -93,6 +95,37 @@ class MemoryPrivateDataStore implements PrivateDataStore {
   Future<void> dismissUnknownSuggestion(int id) async {}
   @override
   Future<void> resolveUnknownSuggestion(int id) async {}
+  @override
+  Future<int> beginVisitSession(PointOfInterest place, DateTime arrival) async {
+    sessions.add(
+      VisitSession(
+        id: sessions.length + 1,
+        poiId: place.id,
+        name: place.name,
+        category: place.category,
+        arrival: arrival,
+        departure: null,
+      ),
+    );
+    return sessions.length;
+  }
+
+  @override
+  Future<void> endVisitSession(int id, DateTime departure) async {
+    final index = sessions.indexWhere((session) => session.id == id);
+    final session = sessions[index];
+    sessions[index] = VisitSession(
+      id: session.id,
+      poiId: session.poiId,
+      name: session.name,
+      category: session.category,
+      arrival: session.arrival,
+      departure: departure,
+    );
+  }
+
+  @override
+  Future<List<VisitSession>> visitSessions() async => sessions;
 }
 
 void main() {
@@ -133,7 +166,12 @@ void main() {
       const Coordinates(35.1, -89.6),
       started.add(const Duration(minutes: 3)),
     );
+    await tracker.recordObservation(
+      const Coordinates(36, -90),
+      started.add(const Duration(minutes: 4)),
+    );
     expect(privateData.recorded.map((place) => place.id), ['cafe']);
+    expect(privateData.sessions.single.departure, isNotNull);
   });
 
   test('prefers a private custom POI over overlapping public data', () async {

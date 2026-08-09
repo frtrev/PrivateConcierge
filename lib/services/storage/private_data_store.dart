@@ -6,6 +6,7 @@ import '../../core/models/geo.dart';
 import '../../core/models/poi.dart';
 import '../../core/models/visited_place.dart';
 import '../../core/models/unknown_place_candidate.dart';
+import '../../core/models/visit_session.dart';
 
 abstract interface class PrivateDataStore {
   Future<void> open();
@@ -30,6 +31,9 @@ abstract interface class PrivateDataStore {
   Future<UnknownPlaceCandidate?> pendingUnknownSuggestion();
   Future<void> dismissUnknownSuggestion(int id);
   Future<void> resolveUnknownSuggestion(int id);
+  Future<int> beginVisitSession(PointOfInterest place, DateTime arrival);
+  Future<void> endVisitSession(int id, DateTime departure);
+  Future<List<VisitSession>> visitSessions();
 }
 
 class SqlitePrivateDataStore implements PrivateDataStore {
@@ -39,7 +43,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -47,6 +51,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
         await _createVisitsTable(db);
         await _createCustomPlacesTable(db);
         await _createUnknownStaysTable(db);
+        await _createVisitSessionsTable(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createVisitsTable(db);
@@ -55,6 +60,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
           await _migrateCustomPlacesToV4(db);
         }
         if (oldVersion < 5) await _createUnknownStaysTable(db);
+        if (oldVersion < 6) await _createVisitSessionsTable(db);
       },
     );
   }
@@ -254,6 +260,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     await deleteVisitHistory();
     await deleteCustomPlaces();
     await _database?.delete('unknown_stays');
+    await _database?.delete('visit_sessions');
   }
 
   @override
@@ -357,6 +364,63 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     await db.delete('unknown_stays', where: 'id = ?', whereArgs: [id]);
   }
 
+  @override
+  Future<int> beginVisitSession(PointOfInterest place, DateTime arrival) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final open = await db.query(
+      'visit_sessions',
+      where: 'poi_id = ? AND departure_ms IS NULL',
+      whereArgs: [place.id],
+      orderBy: 'arrival_ms DESC',
+      limit: 1,
+    );
+    if (open.isNotEmpty) return open.first['id']! as int;
+    return db.insert('visit_sessions', {
+      'poi_id': place.id,
+      'name': place.name,
+      'category': place.category,
+      'arrival_ms': arrival.millisecondsSinceEpoch,
+      'departure_ms': null,
+    });
+  }
+
+  @override
+  Future<void> endVisitSession(int id, DateTime departure) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.update(
+      'visit_sessions',
+      {'departure_ms': departure.millisecondsSinceEpoch},
+      where: 'id = ? AND departure_ms IS NULL',
+      whereArgs: [id],
+    );
+  }
+
+  @override
+  Future<List<VisitSession>> visitSessions() async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final rows = await db.query(
+      'visit_sessions',
+      where: 'departure_ms IS NOT NULL',
+      orderBy: 'arrival_ms DESC',
+    );
+    return rows
+        .map(
+          (row) => VisitSession(
+            id: row['id']! as int,
+            poiId: row['poi_id']! as String,
+            name: row['name']! as String,
+            category: row['category']! as String,
+            arrival: DateTime.fromMillisecondsSinceEpoch(
+              row['arrival_ms']! as int,
+            ),
+            departure: DateTime.fromMillisecondsSinceEpoch(
+              row['departure_ms']! as int,
+            ),
+          ),
+        )
+        .toList();
+  }
+
   static Future<void> _createVisitsTable(Database db) => db.execute(
     'CREATE TABLE visited_places (poi_id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, address TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, visit_count INTEGER NOT NULL, first_visited_ms INTEGER NOT NULL, last_visited_ms INTEGER NOT NULL)',
   );
@@ -367,6 +431,10 @@ class SqlitePrivateDataStore implements PrivateDataStore {
 
   static Future<void> _createUnknownStaysTable(Database db) => db.execute(
     'CREATE TABLE unknown_stays (id INTEGER PRIMARY KEY AUTOINCREMENT, latitude REAL NOT NULL, longitude REAL NOT NULL, visit_count INTEGER NOT NULL, first_visited_ms INTEGER NOT NULL, last_visited_ms INTEGER NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0)',
+  );
+
+  static Future<void> _createVisitSessionsTable(Database db) => db.execute(
+    'CREATE TABLE visit_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, poi_id TEXT NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, arrival_ms INTEGER NOT NULL, departure_ms INTEGER)',
   );
 
   static Future<void> _migrateCustomPlacesToV4(Database db) async {
