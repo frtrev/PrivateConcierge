@@ -27,12 +27,19 @@ import UIKit
 
 private final class IosOnDeviceSpeechHandler: NSObject {
   private let channel: FlutterMethodChannel
-  private let recognizer = SFSpeechRecognizer(locale: Locale.current)
+  private let recognizer: SFSpeechRecognizer? = {
+    let current = SFSpeechRecognizer(locale: Locale.current)
+    if current?.supportsOnDeviceRecognition == true { return current }
+    let english = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    return english?.supportsOnDeviceRecognition == true ? english : current
+  }()
   private let audioEngine = AVAudioEngine()
   private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
   private var recognitionTask: SFSpeechRecognitionTask?
   private var pendingResult: FlutterResult?
   private var timeoutWorkItem: DispatchWorkItem?
+  private var silenceWorkItem: DispatchWorkItem?
+  private var latestTranscription = ""
   private var hasAudioTap = false
 
   init(messenger: FlutterBinaryMessenger) {
@@ -50,8 +57,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
     switch call.method {
     case "isAvailable":
       result(
-        recognizer?.isAvailable == true &&
-          recognizer?.supportsOnDeviceRecognition == true
+        recognizer?.supportsOnDeviceRecognition == true
       )
     case "listenOnce":
       authorizeAndListen(result: result)
@@ -102,7 +108,6 @@ private final class IosOnDeviceSpeechHandler: NSObject {
 
   private func startListening(result: @escaping FlutterResult) {
     guard let recognizer,
-      recognizer.isAvailable,
       recognizer.supportsOnDeviceRecognition
     else {
       result(
@@ -121,9 +126,11 @@ private final class IosOnDeviceSpeechHandler: NSObject {
 
       let request = SFSpeechAudioBufferRecognitionRequest()
       request.requiresOnDeviceRecognition = true
-      request.shouldReportPartialResults = false
+      request.shouldReportPartialResults = true
+      request.taskHint = .search
       recognitionRequest = request
       pendingResult = result
+      latestTranscription = ""
 
       let input = audioEngine.inputNode
       let format = input.outputFormat(forBus: 0)
@@ -137,15 +144,44 @@ private final class IosOnDeviceSpeechHandler: NSObject {
 
       recognitionTask = recognizer.recognitionTask(with: request) {
         [weak self] response, error in
-        if let response, response.isFinal {
-          self?.finish(text: response.bestTranscription.formattedString)
+        guard let self else { return }
+        if let response {
+          let text = response.bestTranscription.formattedString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+          if !text.isEmpty {
+            latestTranscription = text
+            silenceWorkItem?.cancel()
+            if response.isFinal {
+              finish(text: text)
+              return
+            }
+            let silence = DispatchWorkItem { [weak self] in
+              guard let self, !latestTranscription.isEmpty else { return }
+              recognitionRequest?.endAudio()
+              finish(text: latestTranscription)
+            }
+            silenceWorkItem = silence
+            DispatchQueue.main.asyncAfter(
+              deadline: .now() + 1.4,
+              execute: silence
+            )
+          }
         } else if let error {
-          self?.finish(error: error.localizedDescription)
+          if !latestTranscription.isEmpty {
+            finish(text: latestTranscription)
+          } else {
+            finish(error: error.localizedDescription)
+          }
         }
       }
 
       let timeout = DispatchWorkItem { [weak self] in
-        self?.finish(error: "No speech was recognized before the timeout.")
+        guard let self else { return }
+        if latestTranscription.isEmpty {
+          finish(error: "No speech was recognized before the timeout.")
+        } else {
+          finish(text: latestTranscription)
+        }
       }
       timeoutWorkItem = timeout
       DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeout)
@@ -163,6 +199,8 @@ private final class IosOnDeviceSpeechHandler: NSObject {
       guard let self else { return }
       timeoutWorkItem?.cancel()
       timeoutWorkItem = nil
+      silenceWorkItem?.cancel()
+      silenceWorkItem = nil
       recognitionRequest?.endAudio()
       recognitionTask?.cancel()
       recognitionRequest = nil
@@ -178,6 +216,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
       )
       let result = pendingResult ?? fallbackResult
       pendingResult = nil
+      latestTranscription = ""
       if let error {
         result?(
           FlutterError(code: "recognition_failed", message: error, details: nil)
