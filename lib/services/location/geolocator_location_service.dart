@@ -1,10 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../core/models/geo.dart';
 import 'location_service.dart';
 
 class GeolocatorLocationService implements LocationService {
+  static const _visitChannel = EventChannel('charon/location_visits');
   @override
   Future<LocationPermissionState> permissionState() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -69,6 +71,26 @@ class GeolocatorLocationService implements LocationService {
     return Geolocator.getPositionStream(
       locationSettings: settings,
     ).map((position) => Coordinates(position.latitude, position.longitude));
+  }
+
+  @override
+  Stream<LocationVisit> visitEvents() {
+    if (!Platform.isIOS) return const Stream.empty();
+    return _visitChannel.receiveBroadcastStream().map((value) {
+      final event = Map<Object?, Object?>.from(value as Map);
+      return LocationVisit(
+        coordinates: Coordinates(
+          (event['latitude']! as num).toDouble(),
+          (event['longitude']! as num).toDouble(),
+        ),
+        arrival: DateTime.fromMillisecondsSinceEpoch(
+          event['arrivalMs']! as int,
+        ),
+        departure: DateTime.fromMillisecondsSinceEpoch(
+          event['departureMs']! as int,
+        ),
+      );
+    });
   }
 
   LocationPermissionState _map(LocationPermission value) => switch (value) {

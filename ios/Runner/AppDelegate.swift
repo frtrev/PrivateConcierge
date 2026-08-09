@@ -1,5 +1,6 @@
 import Flutter
 import AVFoundation
+import CoreLocation
 import Speech
 import UIKit
 
@@ -7,6 +8,7 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var speechHandler: IosOnDeviceSpeechHandler?
   private var navigationChannel: FlutterMethodChannel?
+  private var visitMonitoringHandler: IosVisitMonitoringHandler?
 
   override func application(
     _ application: UIApplication,
@@ -21,6 +23,9 @@ import UIKit
       forPlugin: "IosOnDeviceSpeech"
     ) else { return }
     speechHandler = IosOnDeviceSpeechHandler(
+      messenger: registrar.messenger()
+    )
+    visitMonitoringHandler = IosVisitMonitoringHandler(
       messenger: registrar.messenger()
     )
     navigationChannel = FlutterMethodChannel(
@@ -47,6 +52,82 @@ import UIKit
         return
       }
       UIApplication.shared.open(url, options: [:]) { opened in result(opened) }
+    }
+  }
+}
+
+private final class IosVisitMonitoringHandler: NSObject,
+  CLLocationManagerDelegate, FlutterStreamHandler
+{
+  private static let queueKey = "charon.completedLocationVisits"
+  private let manager = CLLocationManager()
+  private var eventSink: FlutterEventSink?
+
+  init(messenger: FlutterBinaryMessenger) {
+    super.init()
+    let channel = FlutterEventChannel(
+      name: "charon/location_visits",
+      binaryMessenger: messenger
+    )
+    channel.setStreamHandler(self)
+    manager.delegate = self
+    manager.activityType = .other
+    manager.pausesLocationUpdatesAutomatically = true
+    manager.startMonitoringVisits()
+  }
+
+  func onListen(
+    withArguments arguments: Any?,
+    eventSink events: @escaping FlutterEventSink
+  ) -> FlutterError? {
+    eventSink = events
+    drainQueue()
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+
+  func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+    guard visit.arrivalDate != .distantPast,
+      visit.departureDate != .distantFuture
+    else { return }
+    let payload: [String: Any] = [
+      "latitude": visit.coordinate.latitude,
+      "longitude": visit.coordinate.longitude,
+      "arrivalMs": Int64(visit.arrivalDate.timeIntervalSince1970 * 1000),
+      "departureMs": Int64(visit.departureDate.timeIntervalSince1970 * 1000),
+    ]
+    var queued = UserDefaults.standard.array(forKey: Self.queueKey)
+      as? [[String: Any]] ?? []
+    let arrival = payload["arrivalMs"] as? Int64
+    if !queued.contains(where: {
+      ($0["arrivalMs"] as? NSNumber)?.int64Value == arrival
+    }) {
+      queued.append(payload)
+      if queued.count > 50 { queued.removeFirst(queued.count - 50) }
+      UserDefaults.standard.set(queued, forKey: Self.queueKey)
+    }
+    drainQueue()
+  }
+
+  func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    if CLLocationManager.authorizationStatus() == .authorizedAlways {
+      manager.startMonitoringVisits()
+    }
+  }
+
+  private func drainQueue() {
+    guard let eventSink else { return }
+    DispatchQueue.main.async {
+      let queued = UserDefaults.standard.array(forKey: Self.queueKey)
+        as? [[String: Any]] ?? []
+      for event in queued { eventSink(event) }
+      if !queued.isEmpty {
+        UserDefaults.standard.removeObject(forKey: Self.queueKey)
+      }
     }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/visited_place.dart';
+import '../../core/models/visit_diagnostic.dart';
 import '../../services/storage/private_data_store.dart';
 import '../../services/visits/visit_tracker.dart';
 
@@ -33,7 +34,17 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Most visited places')),
+    appBar: AppBar(
+      title: const Text('Most visited places'),
+      actions: [
+        if (widget.privateData is VisitDiagnosticStore)
+          IconButton(
+            tooltip: 'Tracking diagnostics',
+            icon: const Icon(Icons.monitor_heart_outlined),
+            onPressed: _showDiagnostics,
+          ),
+      ],
+    ),
     body: RefreshIndicator(
       onRefresh: () async => _refresh(),
       child: FutureBuilder<List<VisitedPlace>>(
@@ -147,6 +158,18 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
     }
   }
 
+  Future<void> _showDiagnostics() async {
+    final store = widget.privateData;
+    if (store is! VisitDiagnosticStore) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) =>
+          _TrackingDiagnosticsSheet(store: store as VisitDiagnosticStore),
+    );
+  }
+
   String _relativeDate(DateTime value) {
     final difference = DateTime.now().difference(value);
     if (difference.inMinutes < 1) return 'just now';
@@ -155,6 +178,98 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
     if (difference.inDays < 7) return '${difference.inDays}d ago';
     return '${value.month}/${value.day}/${value.year}';
   }
+}
+
+class _TrackingDiagnosticsSheet extends StatefulWidget {
+  const _TrackingDiagnosticsSheet({required this.store});
+  final VisitDiagnosticStore store;
+
+  @override
+  State<_TrackingDiagnosticsSheet> createState() =>
+      _TrackingDiagnosticsSheetState();
+}
+
+class _TrackingDiagnosticsSheetState extends State<_TrackingDiagnosticsSheet> {
+  late Future<List<VisitDiagnostic>> diagnostics;
+
+  @override
+  void initState() {
+    super.initState();
+    diagnostics = widget.store.visitDiagnostics(limit: 200);
+  }
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: SizedBox(
+      height: MediaQuery.sizeOf(context).height * .78,
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.monitor_heart_outlined),
+            title: const Text('Tracking diagnostics'),
+            subtitle: const Text(
+              'Recent location delivery and visit decisions, stored only on this device and capped at 500 entries.',
+            ),
+            trailing: IconButton(
+              tooltip: 'Clear diagnostics',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () async {
+                await widget.store.clearVisitDiagnostics();
+                if (mounted) {
+                  setState(
+                    () =>
+                        diagnostics = widget.store.visitDiagnostics(limit: 200),
+                  );
+                }
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: FutureBuilder<List<VisitDiagnostic>>(
+              future: diagnostics,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final events = snapshot.data!;
+                if (events.isEmpty) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'No diagnostics yet. Keep background visits enabled and check again after a trip.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  itemCount: events.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final event = events[index];
+                    return ListTile(
+                      dense: true,
+                      title: Text(event.event.replaceAll('_', ' ')),
+                      subtitle: Text(event.detail),
+                      trailing: Text(
+                        _diagnosticTime(event.at),
+                        textAlign: TextAlign.right,
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  String _diagnosticTime(DateTime value) =>
+      '${value.month}/${value.day}\n${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
 }
 
 class _BackgroundTrackingCard extends StatelessWidget {

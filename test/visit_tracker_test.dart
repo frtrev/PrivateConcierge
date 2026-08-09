@@ -26,6 +26,8 @@ class UnusedLocationService implements LocationService {
   @override
   Stream<Coordinates> locationUpdates({required bool background}) =>
       const Stream.empty();
+  @override
+  Stream<LocationVisit> visitEvents() => const Stream.empty();
 }
 
 class MemoryPrivateDataStore implements PrivateDataStore {
@@ -271,5 +273,66 @@ void main() {
       lessThan(1),
     );
     expect(privateData.recorded, isEmpty);
+  });
+
+  test(
+    'records a completed native visit without repeated stationary updates',
+    () async {
+      final repository = MemoryPoiRepository()
+        ..points.add(
+          const PointOfInterest(
+            id: 'cinema',
+            regionId: 'region',
+            name: 'Local Cinema',
+            coordinates: Coordinates(35.1, -89.6),
+            category: 'entertainment',
+            subcategory: 'cinema',
+            address: '',
+          ),
+        );
+      final privateData = MemoryPrivateDataStore();
+      final tracker = VisitTracker(
+        UnusedLocationService(),
+        repository,
+        privateData,
+      );
+      final arrival = DateTime(2026, 8, 9, 19);
+
+      await tracker.recordCompletedVisit(
+        LocationVisit(
+          coordinates: const Coordinates(35.1, -89.6),
+          arrival: arrival,
+          departure: arrival.add(const Duration(hours: 2)),
+        ),
+      );
+
+      expect(privateData.recorded.single.name, 'Local Cinema');
+      expect(privateData.sessions.single.arrival, arrival);
+      expect(
+        privateData.sessions.single.departure,
+        arrival.add(const Duration(hours: 2)),
+      );
+    },
+  );
+
+  test('stores an unknown completed native stay without guessing', () async {
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      MemoryPoiRepository(),
+      privateData,
+    );
+    final arrival = DateTime(2026, 8, 9, 19);
+
+    await tracker.recordCompletedVisit(
+      LocationVisit(
+        coordinates: const Coordinates(35.1, -89.6),
+        arrival: arrival,
+        departure: arrival.add(const Duration(hours: 2)),
+      ),
+    );
+
+    expect(privateData.recorded, isEmpty);
+    expect(privateData.unknownStays, hasLength(1));
   });
 }

@@ -7,6 +7,13 @@ import '../../core/models/poi.dart';
 import '../../core/models/visited_place.dart';
 import '../../core/models/unknown_place_candidate.dart';
 import '../../core/models/visit_session.dart';
+import '../../core/models/visit_diagnostic.dart';
+
+abstract interface class VisitDiagnosticStore {
+  Future<void> recordVisitDiagnostic(String event, String detail, DateTime at);
+  Future<List<VisitDiagnostic>> visitDiagnostics({int limit = 100});
+  Future<void> clearVisitDiagnostics();
+}
 
 abstract interface class PrivateDataStore {
   Future<void> open();
@@ -36,14 +43,14 @@ abstract interface class PrivateDataStore {
   Future<List<VisitSession>> visitSessions();
 }
 
-class SqlitePrivateDataStore implements PrivateDataStore {
+class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
   Database? _database;
   @override
   Future<void> open() async {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 6,
+      version: 7,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -52,6 +59,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
         await _createCustomPlacesTable(db);
         await _createUnknownStaysTable(db);
         await _createVisitSessionsTable(db);
+        await _createVisitDiagnosticsTable(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createVisitsTable(db);
@@ -61,6 +69,7 @@ class SqlitePrivateDataStore implements PrivateDataStore {
         }
         if (oldVersion < 5) await _createUnknownStaysTable(db);
         if (oldVersion < 6) await _createVisitSessionsTable(db);
+        if (oldVersion < 7) await _createVisitDiagnosticsTable(db);
       },
     );
   }
@@ -261,7 +270,50 @@ class SqlitePrivateDataStore implements PrivateDataStore {
     await deleteCustomPlaces();
     await _database?.delete('unknown_stays');
     await _database?.delete('visit_sessions');
+    await clearVisitDiagnostics();
   }
+
+  @override
+  Future<void> recordVisitDiagnostic(
+    String event,
+    String detail,
+    DateTime at,
+  ) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.insert('visit_diagnostics', {
+      'at_ms': at.millisecondsSinceEpoch,
+      'event': event,
+      'detail': detail,
+    });
+    await db.delete(
+      'visit_diagnostics',
+      where:
+          'id NOT IN (SELECT id FROM visit_diagnostics ORDER BY id DESC LIMIT 500)',
+    );
+  }
+
+  @override
+  Future<List<VisitDiagnostic>> visitDiagnostics({int limit = 100}) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final rows = await db.query(
+      'visit_diagnostics',
+      orderBy: 'id DESC',
+      limit: limit.clamp(1, 500),
+    );
+    return rows
+        .map(
+          (row) => VisitDiagnostic(
+            at: DateTime.fromMillisecondsSinceEpoch(row['at_ms']! as int),
+            event: row['event']! as String,
+            detail: row['detail']! as String,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> clearVisitDiagnostics() async =>
+      _database?.delete('visit_diagnostics');
 
   @override
   Future<void> recordUnknownStay(
@@ -435,6 +487,10 @@ class SqlitePrivateDataStore implements PrivateDataStore {
 
   static Future<void> _createVisitSessionsTable(Database db) => db.execute(
     'CREATE TABLE visit_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, poi_id TEXT NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, arrival_ms INTEGER NOT NULL, departure_ms INTEGER)',
+  );
+
+  static Future<void> _createVisitDiagnosticsTable(Database db) => db.execute(
+    'CREATE TABLE visit_diagnostics (id INTEGER PRIMARY KEY AUTOINCREMENT, at_ms INTEGER NOT NULL, event TEXT NOT NULL, detail TEXT NOT NULL)',
   );
 
   static Future<void> _migrateCustomPlacesToV4(Database db) async {

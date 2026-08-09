@@ -19,4 +19,6 @@ class MockLocationService implements LocationService {
   @override
   Stream<Coordinates> locationUpdates({required bool background}) =>
       Stream.value(coordinates);
+  @override
+  Stream<LocationVisit> visitEvents() => const Stream.empty();
 }
