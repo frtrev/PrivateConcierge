@@ -28,6 +28,14 @@ class _NearbyScreenState extends State<NearbyScreen> {
     'gym',
     'museum',
     'grocery',
+    'pharmacy',
+    'entertainment',
+    'shopping',
+    'medical',
+    'education',
+    'lodging',
+    'recreation',
+    'service',
   ];
   @override
   void initState() {

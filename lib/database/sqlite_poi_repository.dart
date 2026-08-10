@@ -14,10 +14,16 @@ class SqlitePoiRepository implements PoiRepository {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'public_geography.db'),
-      version: 1,
-      onCreate: (db, _) => db.execute(
-        'CREATE TABLE poi (id TEXT PRIMARY KEY, region_id TEXT NOT NULL, name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT NOT NULL, subcategory TEXT NOT NULL, address TEXT NOT NULL, description TEXT)',
-      ),
+      version: 2,
+      onCreate: (db, _) async {
+        await db.execute(
+          'CREATE TABLE poi (id TEXT PRIMARY KEY, region_id TEXT NOT NULL, name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT NOT NULL, subcategory TEXT NOT NULL, address TEXT NOT NULL, description TEXT)',
+        );
+        await _createIndexes(db);
+      },
+      onUpgrade: (db, oldVersion, _) async {
+        if (oldVersion < 2) await _createIndexes(db);
+      },
     );
   }
 
@@ -27,8 +33,10 @@ class SqlitePoiRepository implements PoiRepository {
   Future<void> replaceRegion(String regionId, List<PointOfInterest> points) =>
       _db.transaction((txn) async {
         await txn.delete('poi', where: 'region_id = ?', whereArgs: [regionId]);
+        var batch = txn.batch();
+        var pending = 0;
         for (final point in points) {
-          await txn.insert('poi', {
+          batch.insert('poi', {
             'id': point.id,
             'region_id': regionId,
             'name': point.name,
@@ -39,8 +47,28 @@ class SqlitePoiRepository implements PoiRepository {
             'address': point.address,
             'description': point.description,
           });
+          pending++;
+          if (pending == 1000) {
+            await batch.commit(noResult: true);
+            batch = txn.batch();
+            pending = 0;
+          }
         }
+        if (pending > 0) await batch.commit(noResult: true);
       });
+
+  static Future<void> _createIndexes(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poi_lat_lon ON poi(latitude, longitude)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poi_category_lat ON poi(category, latitude)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_poi_region ON poi(region_id)',
+    );
+  }
+
   @override
   Future<void> deleteRegion(String regionId) =>
       _db.delete('poi', where: 'region_id = ?', whereArgs: [regionId]);

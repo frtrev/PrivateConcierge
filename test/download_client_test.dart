@@ -22,8 +22,8 @@ void main() {
         .toList();
 
     expect(chunks, hasLength(1));
-    expect(chunks.single.bytes, hasLength(677771));
-    expect(chunks.single.receivedBytes, 677771);
-    expect(chunks.single.totalBytes, 677771);
+    expect(chunks.single.bytes, hasLength(3420539));
+    expect(chunks.single.receivedBytes, 3420539);
+    expect(chunks.single.totalBytes, 3420539);
   });
 }

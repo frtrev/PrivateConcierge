@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../services/storage/private_data_store.dart';
 
 class PrivacyScreen extends StatelessWidget {
@@ -42,10 +43,14 @@ class PrivacyScreen extends StatelessWidget {
             'Static Overture Maps region packages are downloaded without sending your coordinates.',
           ),
         ),
-        const ListTile(
-          leading: Icon(Icons.info_outline),
-          title: Text('Public data attribution'),
-          subtitle: Text('Overture Maps Foundation • overturemaps.org'),
+        ListTile(
+          leading: const Icon(Icons.info_outline),
+          title: const Text('Public data attribution'),
+          subtitle: const Text(
+            'Overture Maps Foundation • includes Apache-2.0 Foursquare places',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _showAttribution(context),
         ),
         const Divider(),
         ListTile(
@@ -94,4 +99,34 @@ class PrivacyScreen extends StatelessWidget {
       ],
     ),
   );
+
+  Future<void> _showAttribution(BuildContext context) async {
+    final notice = await rootBundle.loadString(
+      'assets/licenses/Foursquare-NOTICE.txt',
+    );
+    final license = await rootBundle.loadString(
+      'assets/licenses/APACHE-2.0.txt',
+    );
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Offline places attribution'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Text(
+              'Overture Maps Foundation\nhttps://overturemaps.org\n\n$notice\n\n$license',
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
 }

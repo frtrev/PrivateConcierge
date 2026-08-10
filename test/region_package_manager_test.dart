@@ -37,7 +37,14 @@ void main() {
     final updates = await manager.install(bundledRegions.first).toList();
     expect(updates.last.fraction, 1);
     expect(await manager.isCurrent(bundledRegions.first), isTrue);
-    expect(repository.points.length, 12448);
+    expect(repository.points.length, 58453);
+    expect(
+      repository.points.any(
+        (point) =>
+            point.name == 'Malco Theatres' && point.category == 'entertainment',
+      ),
+      isTrue,
+    );
     expect(
       (await manager.installedRegions()).single.id,
       bundledRegions.first.id,

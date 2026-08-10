@@ -37,6 +37,13 @@ void main() {
     expect(result.operation, QueryOperation.withinRadius);
   });
 
+  test('maps movie theater language to entertainment POIs', () {
+    final result = interpreter.interpret('Find the nearest movie theater');
+    expect(result.intent, LocalQueryIntent.findPoi);
+    expect(result.category, 'entertainment');
+    expect(result.operation, QueryOperation.nearest);
+  });
+
   test('recognizes comparisons and contextual follow-ups', () {
     final comparison = interpreter.interpret(
       'Which is closer, Target or Walmart?',

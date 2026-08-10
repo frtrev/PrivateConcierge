@@ -15,6 +15,18 @@ class DeterministicCommandInterpreter implements CommandInterpreter {
     'historic': 'historic',
     'museum': 'museum',
     'grocery': 'grocery',
+    'pharmacy': 'pharmacy',
+    'movie': 'entertainment',
+    'theater': 'entertainment',
+    'theatre': 'entertainment',
+    'cinema': 'entertainment',
+    'hospital': 'medical',
+    'doctor': 'medical',
+    'dentist': 'medical',
+    'store': 'shopping',
+    'shopping': 'shopping',
+    'hotel': 'lodging',
+    'school': 'education',
   };
   @override
   AssistantCommand interpret(String text) {

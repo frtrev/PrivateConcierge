@@ -30,13 +30,13 @@ final bundledRegions = <Region>[
       north: 35.824,
       east: -88.716,
     ),
-    version: 20260809,
+    version: 2026080902,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/916aa91077f1f86014b6781b7b0912fe6bff5bbf/assets/overture/us-tn-memphis-50mi.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/39cb6b4a332b74e9f0ba381f3ae22cdfd4f55763/assets/overture/us-tn-memphis-50mi.jsonl.gz',
     ),
-    approximateBytes: 677771,
+    approximateBytes: 3420539,
     coverageMiles: 50,
-    approximatePoiCount: 12448,
+    approximatePoiCount: 58453,
   ),
   Region(
     id: 'us-tn-memphis-100mi',
@@ -49,13 +49,13 @@ final bundledRegions = <Region>[
       north: 36.60,
       east: -88.13,
     ),
-    version: 20260809,
+    version: 2026080902,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/201e2b63a234f004fb2b0c04778011459ccbb276/assets/overture/us-tn-memphis-100mi.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/39cb6b4a332b74e9f0ba381f3ae22cdfd4f55763/assets/overture/us-tn-memphis-100mi.jsonl.gz',
     ),
-    approximateBytes: 1324428,
+    approximateBytes: 6735068,
     coverageMiles: 100,
-    approximatePoiCount: 24219,
+    approximatePoiCount: 114715,
   ),
   Region(
     id: 'us-tn-memphis-150mi',
@@ -68,13 +68,13 @@ final bundledRegions = <Region>[
       north: 37.32,
       east: -87.24,
     ),
-    version: 20260809,
+    version: 2026080902,
     downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/201e2b63a234f004fb2b0c04778011459ccbb276/assets/overture/us-tn-memphis-150mi.jsonl.gz',
+      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/39cb6b4a332b74e9f0ba381f3ae22cdfd4f55763/assets/overture/us-tn-memphis-150mi.jsonl.gz',
     ),
-    approximateBytes: 2494370,
+    approximateBytes: 12940421,
     coverageMiles: 150,
-    approximatePoiCount: 45489,
+    approximatePoiCount: 219574,
   ),
 ];
 

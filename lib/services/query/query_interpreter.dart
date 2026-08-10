@@ -23,6 +23,17 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
     'museum': 'museum',
     'grocery': 'grocery',
     'supermarket': 'grocery',
+    'movie theater': 'entertainment',
+    'movie theatre': 'entertainment',
+    'cinema': 'entertainment',
+    'theater': 'entertainment',
+    'hospital': 'medical',
+    'doctor': 'medical',
+    'dentist': 'medical',
+    'store': 'shopping',
+    'shopping': 'shopping',
+    'hotel': 'lodging',
+    'school': 'education',
   };
 
   static const _cuisines = <String>{
