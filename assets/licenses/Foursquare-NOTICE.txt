@@ -1,0 +1,8 @@
+Private Concierge uses Foursquare-sourced place records distributed through
+Overture Maps. The records were transformed to the Overture schema and then
+normalized into geographically bounded offline packages on August 9, 2026.
+
+Copyright 2024 Foursquare Labs, Inc. All rights reserved.
+
+Licensed under the Apache License, Version 2.0. A copy is included in
+APACHE-2.0.txt.
