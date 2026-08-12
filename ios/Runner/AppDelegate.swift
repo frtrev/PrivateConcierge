@@ -38,6 +38,24 @@ import UIKit
         result(true)
         return
       }
+      if call.method == "publishStatus",
+        let payload = call.arguments as? [String: Any]
+      {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.showStatus(payload: payload)
+        }
+        result(true)
+        return
+      }
+      if call.method == "showAlert",
+        let payload = call.arguments as? [String: Any]
+      {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.showAlert(payload: payload)
+        }
+        result(true)
+        return
+      }
       guard call.method == "consumeTalkRequest" else {
         result(FlutterMethodNotImplemented)
         return
@@ -92,8 +110,45 @@ import UIKit
   }
 
   func requestTalkFromCar() {
-    pendingTalkRequest = true
-    carChannel?.invokeMethod("talkRequested", arguments: nil)
+    guard let speechHandler, let carChannel else {
+      pendingTalkRequest = true
+      self.carChannel?.invokeMethod("talkRequested", arguments: nil)
+      return
+    }
+    if #available(iOS 14.0, *) {
+      CarPlaySessionCoordinator.shared.showStarting()
+    }
+    speechHandler.listenFromCar { [weak self] text, error in
+      guard let self else { return }
+      if let error {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.showRecognitionError(error)
+        }
+        return
+      }
+      guard let text, !text.isEmpty else {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.showRecognitionError(
+            "I didn't hear anything. Please try again."
+          )
+        }
+        return
+      }
+      if #available(iOS 14.0, *) {
+        CarPlaySessionCoordinator.shared.showThinking(transcript: text)
+      }
+      carChannel.invokeMethod("submitRecognizedText", arguments: text) { result in
+        if let payload = result as? [String: Any] {
+          if #available(iOS 14.0, *) {
+            CarPlaySessionCoordinator.shared.show(payload: payload)
+          }
+        } else if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.showRecognitionError(
+            "Charon couldn't process that request."
+          )
+        }
+      }
+    }
   }
 }
 
@@ -201,6 +256,18 @@ private final class IosOnDeviceSpeechHandler: NSObject {
     }
   }
 
+  func listenFromCar(completion: @escaping (String?, String?) -> Void) {
+    authorizeAndListen { value in
+      if let text = value as? String {
+        completion(text, nil)
+      } else if let error = value as? FlutterError {
+        completion(nil, error.message ?? "Voice recognition failed.")
+      } else {
+        completion(nil, "Voice recognition failed.")
+      }
+    }
+  }
+
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "isAvailable":
@@ -269,9 +336,32 @@ private final class IosOnDeviceSpeechHandler: NSObject {
     }
     do {
       let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+      try session.setCategory(
+        .playAndRecord,
+        mode: .voiceChat,
+        options: [.duckOthers, .allowBluetoothHFP]
+      )
       try session.setActive(true, options: .notifyOthersOnDeactivation)
+      if let preferred = session.availableInputs?.first(where: {
+        $0.portType == .carAudio || $0.portType == .bluetoothHFP
+      }) {
+        try session.setPreferredInput(preferred)
+      }
 
+      CarAudioCuePlayer.shared.playListeningCue()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
+        self?.beginRecognition(recognizer: recognizer, result: result)
+      }
+    } catch {
+      finish(error: error.localizedDescription, fallbackResult: result)
+    }
+  }
+
+  private func beginRecognition(
+    recognizer: SFSpeechRecognizer,
+    result: @escaping FlutterResult
+  ) {
+    do {
       let request = SFSpeechAudioBufferRecognitionRequest()
       request.requiresOnDeviceRecognition = true
       request.shouldReportPartialResults = true
@@ -289,6 +379,9 @@ private final class IosOnDeviceSpeechHandler: NSObject {
       hasAudioTap = true
       audioEngine.prepare()
       try audioEngine.start()
+      if #available(iOS 14.0, *) {
+        CarPlaySessionCoordinator.shared.showListening()
+      }
 
       recognitionTask = recognizer.recognitionTask(with: request) {
         [weak self] response, error in

@@ -30,7 +30,11 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
     let template = CPGridTemplate(title: "Charon", gridButtons: [talk])
     interfaceController.setRootTemplate(template, animated: false, completion: nil)
-    CarPlaySessionCoordinator.shared.connect(interfaceController)
+    CarPlaySessionCoordinator.shared.connect(
+      interfaceController,
+      scene: templateApplicationScene,
+      homeTemplate: template
+    )
   }
 
   private func microphoneButtonImage() -> UIImage {
@@ -74,14 +78,99 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 final class CarPlaySessionCoordinator {
   static let shared = CarPlaySessionCoordinator()
   private weak var interfaceController: CPInterfaceController?
+  private weak var carPlayScene: CPTemplateApplicationScene?
+  private var homeTemplate: CPTemplate?
   private var latestPayload: [String: Any]?
   private let speechSynthesizer = AVSpeechSynthesizer()
 
   private init() {}
 
-  func connect(_ interfaceController: CPInterfaceController) {
+  func connect(
+    _ interfaceController: CPInterfaceController,
+    scene: CPTemplateApplicationScene,
+    homeTemplate: CPTemplate
+  ) {
     self.interfaceController = interfaceController
+    self.carPlayScene = scene
+    self.homeTemplate = homeTemplate
     if let latestPayload { show(payload: latestPayload) }
+  }
+
+  func showListening() {
+    showMessage("Listening…", detail: "Speak now. Charon is using the active car audio input.")
+  }
+
+  func showStarting() {
+    showMessage("Starting microphone…", detail: "Charon is connecting to the car audio input.")
+  }
+
+  func showThinking(transcript: String) {
+    showMessage("Thinking…", detail: "You said: \(transcript)")
+  }
+
+  func showRecognitionError(_ message: String) {
+    showMessage("Charon couldn't listen", detail: message, showBack: true)
+  }
+
+  func showAlert(payload: [String: Any]) {
+    guard let interfaceController else { return }
+    let title = payload["title"] as? String ?? "Charon"
+    let body = payload["body"] as? String ?? ""
+    let dismiss = CPAlertAction(title: "Dismiss", style: .default) { _ in
+      interfaceController.dismissTemplate(animated: true, completion: nil)
+    }
+    let message = body.isEmpty ? title : "\(title)\n\(body)"
+    let alert = CPAlertTemplate(titleVariants: [message], actions: [dismiss])
+    interfaceController.presentTemplate(alert, animated: true, completion: nil)
+  }
+
+  func showStatus(payload: [String: Any]) {
+    let state = payload["state"] as? String ?? ""
+    let message = payload["message"] as? String
+    switch state {
+    case "listening":
+      showListening()
+    case "processing":
+      showMessage("Thinking…", detail: "Searching privately on this iPhone.")
+    case "error", "unsupported":
+      showMessage("Charon couldn't listen", detail: message ?? "Please try again.", showBack: true)
+    default:
+      break
+    }
+  }
+
+  func showHome() {
+    guard let interfaceController, let homeTemplate else { return }
+    latestPayload = nil
+    interfaceController.setRootTemplate(homeTemplate, animated: true, completion: nil)
+  }
+
+  private func showMessage(
+    _ message: String,
+    detail: String,
+    showBack: Bool = false
+  ) {
+    guard let interfaceController else { return }
+    let status = CPListItem(text: message, detailText: detail)
+    if #available(iOS 15.0, *) {
+      status.isEnabled = false
+    } else {
+      status.handler = { _, completion in completion() }
+    }
+    var items = [status]
+    if showBack {
+      let goBack = CPListItem(text: "Go Back", detailText: nil)
+      goBack.handler = { [weak self] _, completion in
+        self?.showHome()
+        completion()
+      }
+      items.append(goBack)
+    }
+    let template = CPListTemplate(
+      title: "Charon",
+      sections: [CPListSection(items: items)]
+    )
+    interfaceController.setRootTemplate(template, animated: true, completion: nil)
   }
 
   func show(payload: [String: Any]) {
@@ -91,7 +180,9 @@ final class CarPlaySessionCoordinator {
       ?? payload["response"] as? String
       ?? "Charon finished the request."
     speechSynthesizer.stopSpeaking(at: .immediate)
-    speechSynthesizer.speak(AVSpeechUtterance(string: response))
+    CarAudioCuePlayer.shared.playResponseCue { [weak self] in
+      self?.speechSynthesizer.speak(AVSpeechUtterance(string: response))
+    }
     let places = payload["places"] as? [[String: Any]] ?? []
     if payload["type"] as? String == "navigation", let place = places.first {
       navigate(to: place)
@@ -105,7 +196,13 @@ final class CarPlaySessionCoordinator {
     response: String,
     places: [[String: Any]]
   ) -> [CPListItem] {
-    var items = [CPListItem(text: response, detailText: nil)]
+    let responseItem = CPListItem(text: response, detailText: nil)
+    if #available(iOS 15.0, *) {
+      responseItem.isEnabled = false
+    } else {
+      responseItem.handler = { _, completion in completion() }
+    }
+    var items = [responseItem]
     for place in places.prefix(5) {
       let name = place["name"] as? String ?? "Place"
       let address = place["address"] as? String ?? ""
@@ -121,12 +218,12 @@ final class CarPlaySessionCoordinator {
       }
       items.append(item)
     }
-    let talkAgain = CPListItem(text: "Talk to Charon", detailText: "Ask a follow-up")
-    talkAgain.handler = { _, completion in
-      (UIApplication.shared.delegate as? AppDelegate)?.requestTalkFromCar()
+    let goBack = CPListItem(text: "Go Back", detailText: nil)
+    goBack.handler = { [weak self] _, completion in
+      self?.showHome()
       completion()
     }
-    items.append(talkAgain)
+    items.append(goBack)
     return items
   }
 
@@ -135,7 +232,10 @@ final class CarPlaySessionCoordinator {
     let name = place["name"] as? String ?? "Place"
     let address = place["address"] as? String ?? ""
     let detail = CPListItem(text: name, detailText: address)
-    let navigate = CPListItem(text: "Navigate", detailText: "Open directions in Maps")
+    let navigate = CPListItem(
+      text: "Navigate",
+      detailText: "Open the route in Maps, then tap Go"
+    )
     navigate.handler = { [weak self] _, completion in
       self?.navigate(to: place)
       completion()
@@ -161,8 +261,131 @@ final class CarPlaySessionCoordinator {
       )
     )
     item.name = place["name"] as? String
-    item.openInMaps(launchOptions: [
+    let options = [
       MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
-    ])
+    ]
+    if let carPlayScene {
+      MKMapItem.openMaps(
+        with: [MKMapItem.forCurrentLocation(), item],
+        launchOptions: options,
+        from: carPlayScene,
+        completionHandler: nil
+      )
+    } else {
+      item.openInMaps(launchOptions: options)
+    }
+  }
+}
+
+/// Short locally-generated cues keep the interaction eyes-free without adding
+/// audio files to the app bundle. The completion fires after playback so the
+/// listening cue cannot be captured as part of the driver's request.
+final class CarAudioCuePlayer: NSObject, AVAudioPlayerDelegate {
+  static let shared = CarAudioCuePlayer()
+
+  private var player: AVAudioPlayer?
+  private var completion: (() -> Void)?
+  private var fallback: DispatchWorkItem?
+
+  func playListeningCue() {
+    play(
+      segments: [(frequency: 880, duration: 0.13)],
+      completion: {}
+    )
+  }
+
+  func playResponseCue(completion: @escaping () -> Void) {
+    play(
+      segments: [
+        (frequency: 660, duration: 0.08),
+        (frequency: 880, duration: 0.11),
+      ],
+      completion: completion
+    )
+  }
+
+  private func play(
+    segments: [(frequency: Double, duration: Double)],
+    completion: @escaping () -> Void
+  ) {
+    finishPlayback()
+    do {
+      let session = AVAudioSession.sharedInstance()
+      if !session.isOtherAudioPlaying {
+        try? session.setActive(true, options: .notifyOthersOnDeactivation)
+      }
+      let player = try AVAudioPlayer(data: waveData(segments: segments))
+      self.player = player
+      self.completion = completion
+      player.delegate = self
+      player.volume = 0.65
+      player.prepareToPlay()
+      guard player.play() else {
+        finishPlayback()
+        return
+      }
+      let totalDuration = segments.reduce(0) { $0 + $1.duration }
+      let fallback = DispatchWorkItem { [weak self] in self?.finishPlayback() }
+      self.fallback = fallback
+      DispatchQueue.main.asyncAfter(
+        deadline: .now() + totalDuration + 0.15,
+        execute: fallback
+      )
+    } catch {
+      completion()
+    }
+  }
+
+  func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+    finishPlayback()
+  }
+
+  private func finishPlayback() {
+    fallback?.cancel()
+    fallback = nil
+    player?.stop()
+    player = nil
+    let callback = completion
+    completion = nil
+    callback?()
+  }
+
+  private func waveData(
+    segments: [(frequency: Double, duration: Double)]
+  ) -> Data {
+    let sampleRate = 22_050
+    var samples = [Int16]()
+    for segment in segments {
+      let count = Int(segment.duration * Double(sampleRate))
+      for index in 0..<count {
+        let progress = Double(index) / Double(max(count - 1, 1))
+        let envelope = min(min(progress / 0.12, (1 - progress) / 0.12), 1)
+        let phase = 2 * Double.pi * segment.frequency * Double(index)
+          / Double(sampleRate)
+        samples.append(Int16(sin(phase) * envelope * 10_000))
+      }
+    }
+
+    let byteCount = UInt32(samples.count * MemoryLayout<Int16>.size)
+    var data = Data()
+    data.append(contentsOf: Array("RIFF".utf8))
+    appendLittleEndian(UInt32(36) + byteCount, to: &data)
+    data.append(contentsOf: Array("WAVEfmt ".utf8))
+    appendLittleEndian(UInt32(16), to: &data)
+    appendLittleEndian(UInt16(1), to: &data)
+    appendLittleEndian(UInt16(1), to: &data)
+    appendLittleEndian(UInt32(sampleRate), to: &data)
+    appendLittleEndian(UInt32(sampleRate * 2), to: &data)
+    appendLittleEndian(UInt16(2), to: &data)
+    appendLittleEndian(UInt16(16), to: &data)
+    data.append(contentsOf: Array("data".utf8))
+    appendLittleEndian(byteCount, to: &data)
+    for sample in samples { appendLittleEndian(UInt16(bitPattern: sample), to: &data) }
+    return data
+  }
+
+  private func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+    var littleEndian = value.littleEndian
+    withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
   }
 }

@@ -18,6 +18,10 @@ class VisitTracker {
     this.pollInterval = const Duration(seconds: 30),
     this.minimumObservations = 3,
     this.ambiguityMarginMeters = 20,
+    this.locationNoiseMeters = 15,
+    this.duplicateWindow = const Duration(seconds: 15),
+    this.minimumDepartureObservations = 3,
+    this.minimumDepartureDwell = const Duration(minutes: 1),
     this.onObservation,
     this.onLocation,
   });
@@ -30,6 +34,10 @@ class VisitTracker {
   final Duration pollInterval;
   final int minimumObservations;
   final double ambiguityMarginMeters;
+  final double locationNoiseMeters;
+  final Duration duplicateWindow;
+  final int minimumDepartureObservations;
+  final Duration minimumDepartureDwell;
   final Future<void> Function(DateTime at)? onObservation;
   final Future<void> Function(Coordinates coordinates, DateTime at)? onLocation;
 
@@ -42,6 +50,13 @@ class VisitTracker {
   int _candidateObservations = 0;
   Coordinates? _unknownCenter;
   int? _activeSessionId;
+  String? _activePoiId;
+  String? _departureCandidateId;
+  DateTime? _departureCandidateSince;
+  int _departureObservations = 0;
+  Coordinates? _lastAcceptedCoordinates;
+  DateTime? _lastAcceptedAt;
+  Coordinates? _lastLoggedCoordinates;
   bool _observing = false;
   bool _starting = false;
   Future<void> _observationChain = Future.value();
@@ -149,7 +164,24 @@ class VisitTracker {
 
   @visibleForTesting
   Future<void> recordObservation(Coordinates coordinates, DateTime at) async {
-    await _diagnostic('location_received', _coordinateDetail(coordinates));
+    final lastCoordinates = _lastAcceptedCoordinates;
+    final lastAt = _lastAcceptedAt;
+    if (lastCoordinates != null &&
+        lastAt != null &&
+        distanceMeters(lastCoordinates, coordinates) <= locationNoiseMeters &&
+        at.difference(lastAt).abs() < duplicateWindow) {
+      return;
+    }
+    _lastAcceptedCoordinates = coordinates;
+    _lastAcceptedAt = at;
+    final lastLogged = _lastLoggedCoordinates;
+    final locationChanged =
+        lastLogged == null ||
+        distanceMeters(lastLogged, coordinates) > locationNoiseMeters;
+    if (locationChanged) {
+      _lastLoggedCoordinates = coordinates;
+      await _diagnostic('location_received', _coordinateDetail(coordinates));
+    }
     final custom = await _privateDataStore.customPlacesNear(
       coordinates,
       radiusMeters: visitRadiusMeters,
@@ -161,22 +193,33 @@ class VisitTracker {
             radiusMeters: visitRadiusMeters,
           );
     if (nearby.isEmpty) {
-      await _diagnostic('no_poi_match', _coordinateDetail(coordinates));
+      if (locationChanged) {
+        await _diagnostic('no_poi_match', _coordinateDetail(coordinates));
+      }
       await _recordUnknownObservation(coordinates, at);
       return;
     }
     if (_isAmbiguous(nearby)) {
-      await _diagnostic(
-        'ambiguous_poi',
-        '${nearby[0].name} ${nearby[0].distanceMeters!.round()}m; '
-            '${nearby[1].name} ${nearby[1].distanceMeters!.round()}m',
-      );
+      if (locationChanged) {
+        await _diagnostic(
+          'ambiguous_poi',
+          '${nearby[0].name} ${nearby[0].distanceMeters!.round()}m; '
+              '${nearby[1].name} ${nearby[1].distanceMeters!.round()}m',
+        );
+      }
       await _recordUnknownObservation(coordinates, at);
       return;
     }
     final candidate = nearby.first;
+    if (_activeSessionId != null) {
+      if (candidate.id == _activePoiId) {
+        _clearPendingDeparture();
+        _candidateId = candidate.id;
+        return;
+      }
+      if (!await _confirmDeparture(candidate.id, at)) return;
+    }
     if (_candidateId != candidate.id) {
-      await _endActiveVisit(at);
       _candidateId = candidate.id;
       _unknownCenter = null;
       _candidateSince = at;
@@ -199,6 +242,7 @@ class VisitTracker {
       candidate,
       _candidateSince!,
     );
+    _activePoiId = candidate.id;
     _recordedCandidate = true;
     await _diagnostic('visit_recorded', candidate.name);
   }
@@ -259,8 +303,8 @@ class VisitTracker {
     Coordinates coordinates,
     DateTime at,
   ) async {
-    if (_candidateId != null && _candidateId != 'unknown') {
-      await _endActiveVisit(at);
+    if (_activeSessionId != null && !await _confirmDeparture('unknown', at)) {
+      return;
     }
     final sameCluster =
         _candidateId == 'unknown' &&
@@ -294,7 +338,34 @@ class VisitTracker {
     final id = _activeSessionId;
     if (id == null) return;
     _activeSessionId = null;
+    _activePoiId = null;
     await _privateDataStore.endVisitSession(id, departure);
+  }
+
+  Future<bool> _confirmDeparture(String newLocationId, DateTime at) async {
+    if (_departureCandidateId != newLocationId) {
+      _departureCandidateId = newLocationId;
+      _departureCandidateSince = at;
+      _departureObservations = 1;
+      await _diagnostic('departure_pending', newLocationId);
+      return false;
+    }
+    _departureObservations++;
+    final since = _departureCandidateSince!;
+    if (_departureObservations < minimumDepartureObservations ||
+        at.difference(since) < minimumDepartureDwell) {
+      return false;
+    }
+    await _endActiveVisit(since);
+    await _diagnostic('departure_confirmed', newLocationId, at: at);
+    _clearPendingDeparture();
+    return true;
+  }
+
+  void _clearPendingDeparture() {
+    _departureCandidateId = null;
+    _departureCandidateSince = null;
+    _departureObservations = 0;
   }
 
   void _resetCandidate() {
@@ -303,6 +374,7 @@ class VisitTracker {
     _candidateObservations = 0;
     _unknownCenter = null;
     _recordedCandidate = false;
+    _clearPendingDeparture();
   }
 
   void _enqueue(Future<void> Function() work) {

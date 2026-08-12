@@ -16,6 +16,7 @@ class PrivateConciergeApp extends StatefulWidget {
 class _PrivateConciergeAppState extends State<PrivateConciergeApp> {
   static const _carChannel = MethodChannel('charon/car');
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final _voiceController = VoiceAssistantController();
   bool _openingAssistant = false;
 
   @override
@@ -25,6 +26,11 @@ class _PrivateConciergeAppState extends State<PrivateConciergeApp> {
       if (call.method == 'talkRequested') {
         _openAssistant();
         return true;
+      }
+      if (call.method == 'submitRecognizedText') {
+        final text = call.arguments as String? ?? '';
+        final result = await widget.dependencies.assistant.answer(text);
+        return result.toMap();
       }
       if (call.method == 'submitText') {
         final text = call.arguments as String? ?? '';
@@ -42,7 +48,10 @@ class _PrivateConciergeAppState extends State<PrivateConciergeApp> {
   }
 
   void _openAssistant() {
-    if (_openingAssistant) return;
+    if (_openingAssistant) {
+      _voiceController.requestListening();
+      return;
+    }
     _openingAssistant = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final navigator = _navigatorKey.currentState;
@@ -52,6 +61,7 @@ class _PrivateConciergeAppState extends State<PrivateConciergeApp> {
             builder: (_) => VoiceAssistantScreen(
               dependencies: widget.dependencies,
               autoStart: true,
+              controller: _voiceController,
             ),
           ),
         );

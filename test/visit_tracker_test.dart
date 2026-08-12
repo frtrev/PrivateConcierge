@@ -172,6 +172,14 @@ void main() {
       const Coordinates(36, -90),
       started.add(const Duration(minutes: 4)),
     );
+    await tracker.recordObservation(
+      const Coordinates(36, -90),
+      started.add(const Duration(minutes: 4, seconds: 30)),
+    );
+    await tracker.recordObservation(
+      const Coordinates(36, -90),
+      started.add(const Duration(minutes: 5)),
+    );
     expect(privateData.recorded.map((place) => place.id), ['cafe']);
     expect(privateData.sessions.single.departure, isNotNull);
   });
@@ -205,7 +213,10 @@ void main() {
     final at = DateTime(2026, 8, 8, 12);
 
     await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
-    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+    await tracker.recordObservation(
+      const Coordinates(35.1, -89.6),
+      at.add(const Duration(seconds: 20)),
+    );
 
     expect(privateData.recorded.single.id, 'custom-0');
   });
@@ -239,6 +250,102 @@ void main() {
     );
 
     expect(privateData.recorded, isEmpty);
+  });
+
+  test('GPS noise and one away sample do not end an active visit', () async {
+    final repository = MemoryPoiRepository()
+      ..points.add(
+        const PointOfInterest(
+          id: 'home',
+          regionId: 'region',
+          name: 'Home',
+          coordinates: Coordinates(35.1, -89.6),
+          category: 'home',
+          subcategory: 'custom',
+          address: '',
+        ),
+      );
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      repository,
+      privateData,
+      minimumDwell: Duration.zero,
+      minimumObservations: 2,
+    );
+    final at = DateTime(2026, 8, 8, 12);
+
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+    await tracker.recordObservation(
+      const Coordinates(35.1, -89.6),
+      at.add(const Duration(seconds: 20)),
+    );
+    await tracker.recordObservation(
+      const Coordinates(35.1015, -89.6),
+      at.add(const Duration(minutes: 1)),
+    );
+    await tracker.recordObservation(
+      const Coordinates(35.10002, -89.6),
+      at.add(const Duration(minutes: 2)),
+    );
+
+    expect(privateData.sessions.single.departure, isNull);
+  });
+
+  test('ends a visit only after sustained observations elsewhere', () async {
+    final repository = MemoryPoiRepository()
+      ..points.addAll(const [
+        PointOfInterest(
+          id: 'home',
+          regionId: 'region',
+          name: 'Home',
+          coordinates: Coordinates(35.1, -89.6),
+          category: 'home',
+          subcategory: 'custom',
+          address: '',
+        ),
+        PointOfInterest(
+          id: 'store',
+          regionId: 'region',
+          name: 'Store',
+          coordinates: Coordinates(35.11, -89.6),
+          category: 'store',
+          subcategory: 'store',
+          address: '',
+        ),
+      ]);
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      repository,
+      privateData,
+      minimumDwell: Duration.zero,
+      minimumObservations: 2,
+    );
+    final at = DateTime(2026, 8, 8, 12);
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+    await tracker.recordObservation(
+      const Coordinates(35.1, -89.6),
+      at.add(const Duration(seconds: 20)),
+    );
+    await tracker.recordObservation(
+      const Coordinates(35.11, -89.6),
+      at.add(const Duration(minutes: 1)),
+    );
+    await tracker.recordObservation(
+      const Coordinates(35.11, -89.6),
+      at.add(const Duration(minutes: 1, seconds: 30)),
+    );
+    expect(privateData.sessions.single.departure, isNull);
+    await tracker.recordObservation(
+      const Coordinates(35.11, -89.6),
+      at.add(const Duration(minutes: 2)),
+    );
+
+    expect(
+      privateData.sessions.single.departure,
+      at.add(const Duration(minutes: 1)),
+    );
   });
 
   test('records one qualifying unknown stay without guessing a POI', () async {

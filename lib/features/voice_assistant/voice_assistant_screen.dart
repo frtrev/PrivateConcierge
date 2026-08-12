@@ -5,14 +5,26 @@ import '../../core/models/assistant_result.dart';
 import '../../core/models/poi.dart';
 import '../../services/voice/voice_recognition_service.dart';
 
+class VoiceAssistantController {
+  VoidCallback? _listener;
+
+  void requestListening() => _listener?.call();
+  void attach(VoidCallback listener) => _listener = listener;
+  void detach(VoidCallback listener) {
+    if (_listener == listener) _listener = null;
+  }
+}
+
 class VoiceAssistantScreen extends StatefulWidget {
   const VoiceAssistantScreen({
     super.key,
     required this.dependencies,
     this.autoStart = false,
+    this.controller,
   });
   final AppDependencies dependencies;
   final bool autoStart;
+  final VoiceAssistantController? controller;
   @override
   State<VoiceAssistantScreen> createState() => _VoiceAssistantScreenState();
 }
@@ -30,20 +42,52 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   @override
   void initState() {
     super.initState();
+    widget.controller?.attach(_requestListening);
     if (widget.autoStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _listen());
     }
   }
 
+  void _requestListening() {
+    if (state == VoiceRecognitionState.listening ||
+        state == VoiceRecognitionState.processing) {
+      return;
+    }
+    _listen();
+  }
+
   Future<void> _listen() async {
     await for (final result in widget.dependencies.voice.listenOnce()) {
       if (!mounted) return;
+      await _publishCarStatus(
+        result.text == null && result.state == VoiceRecognitionState.completed
+            ? VoiceRecognitionState.processing
+            : result.state,
+        result.message,
+      );
       setState(() {
         state = result.state;
         if (result.message != null) response = result.message!;
         if (result.text != null) transcript = result.text!;
       });
-      if (result.text != null) await _execute(result.text!);
+      if (result.text != null) {
+        await _publishCarStatus(VoiceRecognitionState.processing, 'Thinking…');
+        await _execute(result.text!);
+      }
+    }
+  }
+
+  Future<void> _publishCarStatus(
+    VoiceRecognitionState status,
+    String? message,
+  ) async {
+    try {
+      await _carChannel.invokeMethod<void>('publishStatus', {
+        'state': status.name,
+        'message': message,
+      });
+    } on PlatformException {
+      // No active vehicle session is a normal phone-only state.
     }
   }
 
@@ -76,6 +120,7 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
 
   @override
   void dispose() {
+    widget.controller?.detach(_requestListening);
     textController.dispose();
     super.dispose();
   }

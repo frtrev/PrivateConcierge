@@ -1,4 +1,5 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/services.dart';
 
 abstract interface class NotificationService {
   Future<void> initialize();
@@ -10,6 +11,7 @@ abstract interface class NotificationService {
 }
 
 class LocalNotificationService implements NotificationService {
+  static const _carChannel = MethodChannel('charon/car');
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
@@ -48,20 +50,30 @@ class LocalNotificationService implements NotificationService {
     required int id,
     required String title,
     required String body,
-  }) => _plugin.show(
-    id: id,
-    title: title,
-    body: body,
-    notificationDetails: const NotificationDetails(
-      android: AndroidNotificationDetails(
-        'routine_alerts',
-        'Routine alerts',
-        channelDescription: 'Private reminders based on learned routines',
-        importance: Importance.high,
-        priority: Priority.high,
-        category: AndroidNotificationCategory.message,
+  }) async {
+    await _plugin.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'routine_alerts',
+          'Routine alerts',
+          channelDescription: 'Private reminders based on learned routines',
+          importance: Importance.high,
+          priority: Priority.high,
+          category: AndroidNotificationCategory.message,
+        ),
+        iOS: DarwinNotificationDetails(categoryIdentifier: 'charon_alert'),
       ),
-      iOS: DarwinNotificationDetails(categoryIdentifier: 'charon_alert'),
-    ),
-  );
+    );
+    try {
+      await _carChannel.invokeMethod<void>('showAlert', {
+        'title': title,
+        'body': body,
+      });
+    } on PlatformException {
+      // The system notification is still delivered when no car is connected.
+    }
+  }
 }
