@@ -52,6 +52,12 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
       (option) => option.coverageMiles == 50,
       orElse: () => options.first,
     );
+    const autoInstall = bool.fromEnvironment('E2E_AUTO_INSTALL');
+    if (autoInstall) {
+      dialogOpen = false;
+      _start(requestLocation: true, confirmedRegion: selected);
+      return;
+    }
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -64,7 +70,7 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Private Concierge will make a one-time download for ${selected.displayName}. Your location is not included in the request.',
+                'Private Concierge will briefly connect to Overture Maps and download the tiles around ${selected.displayName}. After installation, place matching and travel history stay on this device and work offline.',
               ),
               const SizedBox(height: 20),
               const Text('Choose coverage'),
@@ -86,7 +92,7 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                'About ${_formatBytes(selected.approximateBytes)} • approximately ${selected.approximatePoiCount ?? 0} places',
+                'Estimated download: ${_formatBytes(selected.approximateBytes)}. Actual size varies with local POI density.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 8),
@@ -215,7 +221,7 @@ class _BootstrapScreenState extends State<BootstrapScreen> {
                         children: [
                           Text(
                             update.error == null
-                                ? 'Use your location to select private offline coverage. Coordinates stay on this device.'
+                                ? 'Use your location once to identify and download nearby Overture tiles. Travel history and future place matching stay on this device.'
                                 : '${update.error}',
                             textAlign: TextAlign.center,
                             style: TextStyle(

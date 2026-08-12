@@ -18,7 +18,17 @@ class LocalNotificationService implements NotificationService {
     await _plugin.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(),
+        iOS: DarwinInitializationSettings(
+          notificationCategories: <DarwinNotificationCategory>[
+            DarwinNotificationCategory(
+              'charon_alert',
+              options: <DarwinNotificationCategoryOption>{
+                DarwinNotificationCategoryOption.allowInCarPlay,
+                DarwinNotificationCategoryOption.allowAnnouncement,
+              },
+            ),
+          ],
+        ),
       ),
     );
     await _plugin
@@ -49,8 +59,9 @@ class LocalNotificationService implements NotificationService {
         channelDescription: 'Private reminders based on learned routines',
         importance: Importance.high,
         priority: Priority.high,
+        category: AndroidNotificationCategory.message,
       ),
-      iOS: DarwinNotificationDetails(),
+      iOS: DarwinNotificationDetails(categoryIdentifier: 'charon_alert'),
     ),
   );
 }

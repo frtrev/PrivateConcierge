@@ -51,6 +51,12 @@ class BootstrapService {
     return coordinates!;
   }
 
+  Stream<Coordinates> foregroundLocationUpdates() =>
+      locationService.locationUpdates(background: false).map((value) {
+        coordinates = value;
+        return value;
+      });
+
   Future<void> installHomeRegion(
     Region selected, {
     bool forceUpdate = false,
@@ -92,7 +98,7 @@ class BootstrapService {
         yield const BootstrapUpdate(
           progress: .28,
           status:
-              'Location helps select your offline city data. Your coordinates stay on this device.',
+              'Location is used once to identify and download your offline area. Your travel history stays on this device.',
           requiresLocationExplanation: true,
         );
         return;
@@ -110,12 +116,14 @@ class BootstrapService {
           progress: .52,
           status: 'Determining current region',
         );
-        final options = downloadOptionsFor(coordinates!);
+        final options = await regionResolver.options(coordinates!);
         region = confirmedRegion;
         if (region == null) {
-          for (final option in options.reversed) {
-            if (await packageManager.isCurrent(option)) {
-              region = option;
+          final installed = await packageManager.installedRegions();
+          for (final candidate in installed) {
+            if (distanceMeters(candidate.center, coordinates!) <=
+                candidate.coverageMiles * 1609.344) {
+              region = candidate;
               break;
             }
           }

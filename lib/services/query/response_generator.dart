@@ -18,6 +18,14 @@ class TemplateQueryResponseGenerator implements QueryResponseGenerator {
       case QueryResultStatus.unavailable:
         return 'Your location is unavailable, so I cannot calculate that locally right now.';
       case QueryResultStatus.empty:
+        final brand = plan.placeQuery?.brand;
+        final alternative = result.alternativePoi;
+        if (brand != null) {
+          final notFound = "I couldn't find a $brand nearby.";
+          if (alternative == null) return notFound;
+          final kind = _categoryLabel(plan.placeQuery?.category);
+          return '$notFound The closest $kind is ${alternative.name}, about ${_miles(alternative.distanceMeters)} miles away.';
+        }
         return 'I found no matching places in the downloaded region.';
       case QueryResultStatus.success:
         break;
@@ -36,7 +44,7 @@ class TemplateQueryResponseGenerator implements QueryResponseGenerator {
       return '${selected.name} is about ${_miles(selected.distanceMeters)} miles away.';
     }
     if (selected != null && plan.operation == QueryOperation.nearest) {
-      final kind = plan.category == null ? 'matching place' : plan.category!;
+      final kind = plan.placeQuery?.brand ?? _categoryLabel(plan.category);
       return '${selected.name} is the closest $kind, about ${_miles(selected.distanceMeters)} miles away.';
     }
     return 'Nearby: ${result.places.map((place) => '${place.name}, ${_miles(place.distanceMeters)} miles').join('; ')}.';
@@ -45,4 +53,12 @@ class TemplateQueryResponseGenerator implements QueryResponseGenerator {
   String _miles(double? meters) => meters == null
       ? 'an unknown distance'
       : (meters / 1609.344).toStringAsFixed(1);
+
+  String _categoryLabel(String? category) => switch (category) {
+    'gas' => 'gas station',
+    'shopping' => 'store',
+    'medical' => 'medical place',
+    null => 'matching place',
+    _ => category,
+  };
 }

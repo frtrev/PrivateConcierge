@@ -5,7 +5,6 @@ import '../settings/privacy_screen.dart';
 import '../voice_assistant/voice_assistant_screen.dart';
 import '../visits/most_visited_screen.dart';
 import '../visits/my_places_screen.dart';
-import '../../services/geography/region_resolver.dart';
 import '../../services/storage/private_data_store.dart';
 import '../../core/models/unknown_place_candidate.dart';
 import '../../core/models/region.dart';
@@ -182,13 +181,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       return;
     }
-    final options = downloadOptionsFor(coordinates);
+    final options = await widget.dependencies.bootstrap.regionResolver.options(
+      coordinates,
+    );
     if (options.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Offline home-area packages are not available for this city yet.',
+              'The current location could not be prepared for offline use.',
             ),
           ),
         );
@@ -234,7 +235,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Your city was identified from this device’s location. Choose how far offline place search should extend from home.',
+                  'This area is centered on your device’s current location. The city name is only a label. Choose how far offline place search should extend.',
                 ),
                 const SizedBox(height: 18),
                 SegmentedButton<int>(
@@ -257,7 +258,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  '${_formatBytes(selected.approximateBytes)} compressed • approximately ${selected.approximatePoiCount ?? 0} places',
+                  '${_formatBytes(selected.approximateBytes)} estimated download${selected.approximatePoiCount == null ? '' : ' • approximately ${selected.approximatePoiCount} places'}',
                 ),
                 const SizedBox(height: 10),
                 Text(

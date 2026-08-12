@@ -1,4 +1,5 @@
 import 'poi.dart';
+import 'place_query.dart';
 
 enum LocalQueryIntent {
   findPoi,
@@ -23,6 +24,7 @@ class ParsedQuery {
     this.limit = 5,
     this.usesPreviousResults = false,
     this.usesPreviousSelection = false,
+    this.placeQuery,
   });
 
   final LocalQueryIntent intent;
@@ -36,6 +38,7 @@ class ParsedQuery {
   final int limit;
   final bool usesPreviousResults;
   final bool usesPreviousSelection;
+  final PlaceQuery? placeQuery;
 }
 
 class QueryPlan {
@@ -50,6 +53,7 @@ class QueryPlan {
     this.limit = 5,
     this.candidatePois = const [],
     this.selectedPoi,
+    this.placeQuery,
   });
 
   final LocalQueryIntent intent;
@@ -62,6 +66,7 @@ class QueryPlan {
   final int limit;
   final List<PointOfInterest> candidatePois;
   final PointOfInterest? selectedPoi;
+  final PlaceQuery? placeQuery;
 }
 
 enum QueryResultStatus { success, empty, clarification, unavailable, unknown }
@@ -74,6 +79,10 @@ class LocalQueryResult {
     this.comparisonPoi,
     this.navigationRequested = false,
     this.detail,
+    this.alternativePoi,
+    this.candidatesRetrieved,
+    this.candidatesMatched,
+    this.selectedMatchScore,
   });
 
   final QueryResultStatus status;
@@ -82,4 +91,8 @@ class LocalQueryResult {
   final PointOfInterest? comparisonPoi;
   final bool navigationRequested;
   final String? detail;
+  final PointOfInterest? alternativePoi;
+  final int? candidatesRetrieved;
+  final int? candidatesMatched;
+  final double? selectedMatchScore;
 }

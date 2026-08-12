@@ -1,28 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../app/app_dependencies.dart';
-import '../../core/models/assistant_command.dart';
-import '../../core/models/local_query.dart';
+import '../../core/models/assistant_result.dart';
 import '../../core/models/poi.dart';
 import '../../services/voice/voice_recognition_service.dart';
 
 class VoiceAssistantScreen extends StatefulWidget {
-  const VoiceAssistantScreen({super.key, required this.dependencies});
+  const VoiceAssistantScreen({
+    super.key,
+    required this.dependencies,
+    this.autoStart = false,
+  });
   final AppDependencies dependencies;
+  final bool autoStart;
   @override
   State<VoiceAssistantScreen> createState() => _VoiceAssistantScreenState();
 }
 
 class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
+  static const _carChannel = MethodChannel('charon/car');
   final textController = TextEditingController();
   VoiceRecognitionState state = VoiceRecognitionState.idle;
   String transcript = '';
   String response =
       'Tap the microphone and ask about your location or nearby places.';
+  PointOfInterest? selectedPlace;
+  bool openingMaps = false;
 
   @override
   void initState() {
     super.initState();
-    response = _personalize(response);
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _listen());
+    }
   }
 
   Future<void> _listen() async {
@@ -42,73 +52,27 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     setState(() {
       transcript = text.trim();
       state = VoiceRecognitionState.processing;
+      selectedPlace = null;
     });
-    final answer = await widget.dependencies.queryEngine.answer(
-      text,
-      origin: widget.dependencies.bootstrap.coordinates,
-    );
-    if (answer.plan.intent != LocalQueryIntent.unknown) {
-      response = answer.text;
-      if (answer.result.navigationRequested &&
-          answer.result.selectedPoi != null) {
-        final opened = await widget.dependencies.navigation.navigateTo(
-          answer.result.selectedPoi!,
-        );
-        if (!opened) response = 'I could not open the maps app. ${answer.text}';
-      }
-      response = _personalize(response);
-      if (mounted) setState(() => state = VoiceRecognitionState.completed);
-      return;
+    final answer = await widget.dependencies.assistant.answer(text);
+    response = answer.response;
+    selectedPlace = answer.selectedPlace?.toPoi();
+    try {
+      await _carChannel.invokeMethod<void>('publishResult', answer.toMap());
+    } on PlatformException {
+      // The phone assistant remains usable when no vehicle session is active.
     }
-    final command = widget.dependencies.commands.interpret(text);
-    switch (command.intent) {
-      case AssistantIntent.currentLocation:
-      case AssistantIntent.currentRegion:
-        response = widget.dependencies.bootstrap.region == null
-            ? 'I do not have a current region.'
-            : 'You are in ${widget.dependencies.bootstrap.region!.displayName}.';
-      case AssistantIntent.downloadedRegions:
-        final regions = await widget.dependencies.packages.installedRegions();
-        response = regions.isEmpty
-            ? 'No regions are downloaded.'
-            : 'Downloaded: ${regions.map((e) => e.displayName).join(', ')}.';
-      case AssistantIntent.findNearby:
-        final origin = widget.dependencies.bootstrap.coordinates;
-        if (origin == null) {
-          response = 'Location is unavailable. Enable it to search nearby.';
-          break;
+    if (answer.type == AssistantResultType.navigation) {
+      final place = selectedPlace;
+      if (place != null) {
+        final opened = await widget.dependencies.navigation.navigateTo(place);
+        if (!opened) {
+          response = 'I could not open the maps app. ${answer.response}';
         }
-        final points = await widget.dependencies.nearby.search(
-          origin,
-          category: command.parameters['category'],
-        );
-        response = points.isEmpty
-            ? 'I found no matching places in the downloaded region.'
-            : _describe(points);
-      case AssistantIntent.downloadCurrentRegion:
-        response = 'The current region is already checked during startup.';
-      case AssistantIntent.unknown:
-        response =
-            'I can answer where you are, list downloaded regions, or find nearby places.';
+      }
     }
-    response = _personalize(response);
     if (mounted) setState(() => state = VoiceRecognitionState.completed);
   }
-
-  String _personalize(String message) {
-    final profile = widget.dependencies.profileService.load();
-    if (profile == null) return message;
-    final address = profile.preferredAddress.trim();
-    final prefix = address.isEmpty ? '' : '$address, ';
-    return switch (profile.personality) {
-      'professional' => '$prefix$message',
-      'playful' => '${prefix}here’s what I found: $message',
-      _ => '${prefix}of course. $message',
-    };
-  }
-
-  String _describe(List<PointOfInterest> points) =>
-      'Nearby: ${points.take(3).map((p) => '${p.name}, ${(p.distanceMeters! / 1609.344).toStringAsFixed(1)} miles').join('; ')}.';
 
   @override
   void dispose() {
@@ -119,6 +83,20 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   void _submitText(String value) {
     textController.clear();
     _execute(value);
+  }
+
+  Future<void> _openInMaps() async {
+    final place = selectedPlace;
+    if (place == null || openingMaps) return;
+    setState(() => openingMaps = true);
+    final opened = await widget.dependencies.navigation.navigateTo(place);
+    if (!mounted) return;
+    setState(() => openingMaps = false);
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('I could not open the maps app.')),
+      );
+    }
   }
 
   @override
@@ -148,7 +126,29 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
                   child: Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Text(response),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(response),
+                          if (selectedPlace != null) ...[
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: openingMaps ? null : _openInMaps,
+                              icon: openingMaps
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.map_outlined),
+                              label: Text(
+                                openingMaps ? 'Opening…' : 'Open in Maps',
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

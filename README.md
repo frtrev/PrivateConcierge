@@ -13,7 +13,12 @@ A privacy-first Flutter foundation for Android and Android Auto. Personal locati
 
 Public geographic data uses `public_geography.db`. Private user data uses `private_user_data.db`; clearing private data does not remove downloaded regions.
 
-Offline POIs come from the Overture Maps Places theme. The repository contains compact, checksum-verified regional packages generated from the official GeoParquet distribution. Downloads are static files, so the phone never submits its current coordinates to a geographic query service. If a package host is temporarily unavailable, the app uses the matching copy bundled in the APK.
+Offline POIs come from the Overture Maps Places theme. During setup, the phone
+uses its current coordinates to choose a radius and range-read the intersecting
+tiles from Overture's public static PMTiles archive. The archive host therefore
+sees the normal IP address and coarse tiles inherent in that one-time download;
+it receives no account, device identity, or travel history. POI matching and
+activity history remain local after installation.
 
 Visited places are a separate private dataset in `private_user_data.db`. While the app is in the foreground, it checks the current location every 30 seconds. Remaining within 75 meters of the same downloaded POI for two minutes records one visit; another count requires at least four hours. Only the aggregate place, count, and first/last timestamps are stored—no raw route history. Visit history can be deleted independently from the Privacy screen.
 
@@ -26,17 +31,27 @@ flutter pub get
 flutter run
 ```
 
-Use mock Memphis GPS without device location:
+Use deterministic mock GPS without device location:
 
 ```sh
 flutter run --dart-define=USE_MOCK_LOCATION=true
 ```
 
-The phone identifies the supported home city from its location. Memphis setup defaults to 50-mile coverage, with genuine 100- and 150-mile Overture packages available from **Install or update home area**. Packages include named non-residential Overture destinations across business, entertainment, shopping, medical, education, service, and other categories. One verified home-area package is installed in the indexed local SQLite database at a time.
+Optional coordinates can be supplied with `MOCK_LATITUDE` and
+`MOCK_LONGITUDE`. On a real phone, the operating-system geocoder supplies a
+friendly municipality label while the coverage remains centered on the actual
+coordinates. Setup defaults to 50 miles; 100 and 150 miles are available from
+**Install or update home area**.
 
 ## Refresh Overture packages
 
-Install the official `overturemaps` Python client, export the `place` type for a region's bounding box as GeoJSONSeq, then normalize it:
+The app now discovers Overture's current release through its STAC catalog and
+range-reads the global Places PMTiles archive directly. It calculates the zoom
+14 tiles intersecting a 50, 100, or 150-mile coordinate-centered area, decodes
+the MVT features on-device, filters them to the requested radius, and writes a
+compact local SQLite database. No Private Concierge location backend is used.
+
+The older package-normalization helper remains useful for diagnostics:
 
 ```sh
 overturemaps download --bbox=-90.042,34.738,-89.158,35.462 -f geojsonseq --type=place -o memphis.geojsonseq
@@ -44,7 +59,10 @@ python3 tool/normalize_overture_places.py memphis.geojsonseq assets/overture/us-
 shasum -a 256 assets/overture/us-tn-memphis.jsonl.gz
 ```
 
-Update the matching checksum and version in the app after regeneration. The normalizer intentionally excludes Foursquare-sourced features, leaving the compact packages under Overture's CDLA Permissive/CC0 sources. Data attribution: Overture Maps Foundation, [overturemaps.org](https://overturemaps.org/).
+The normalizer intentionally excludes Foursquare-sourced features. The live
+PMTiles path reads the complete Overture Places theme, with the required notices
+bundled under `assets/licenses`. Data attribution: Overture Maps Foundation,
+[overturemaps.org](https://overturemaps.org/).
 
 On-device speech is enabled only when Android reports an on-device recognizer. The app never silently falls back to a cloud recognizer. Android Auto provides Car App Library screens for Assistant and Nearby; direct car microphone and the native-to-Flutter POI bridge remain explicit next milestones.
 

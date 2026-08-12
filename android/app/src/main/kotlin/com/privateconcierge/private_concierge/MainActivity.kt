@@ -1,7 +1,8 @@
-package com.privateconcierge.private_concierge
+package com.neotheone.privateconcierge
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -20,9 +21,28 @@ class MainActivity : FlutterActivity() {
     private val speechRequest = 7001
     private var pendingResult: MethodChannel.Result? = null
     private var recognizer: SpeechRecognizer? = null
+    private var carChannel: MethodChannel? = null
+    private var pendingTalkRequest = false
+
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        CharonFlutterEngineHost.get(context)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        pendingTalkRequest = intent?.data?.let { it.scheme == "charon" && it.host == "talk" } == true
+        super.onCreate(savedInstanceState)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        carChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "charon/car").also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "consumeTalkRequest") {
+                    val pending = pendingTalkRequest
+                    pendingTalkRequest = false
+                    result.success(pending)
+                } else result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isAvailable" -> result.success(isOnDeviceRecognitionAvailable())
@@ -49,6 +69,15 @@ class MainActivity : FlutterActivity() {
                 startActivity(intent)
                 result.success(true)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.data?.let { it.scheme == "charon" && it.host == "talk" } == true) {
+            pendingTalkRequest = true
+            carChannel?.invokeMethod("talkRequested", null)
         }
     }
 

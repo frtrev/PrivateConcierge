@@ -1,13 +1,18 @@
 import '../../core/models/local_query.dart';
 import '../../core/models/poi.dart';
 import '../nearby/nearby_service.dart';
+import 'place_search_service.dart';
 import 'query_capability.dart';
 
 const _metersPerMile = 1609.344;
 
 class FindPoiCapability implements QueryCapability {
-  const FindPoiCapability(this.nearby);
+  FindPoiCapability(this.nearby)
+    : structuredSearch = StructuredPlaceSearch(
+        retriever: PlaceCandidateRetriever(nearby),
+      );
   final NearbyService nearby;
+  final StructuredPlaceSearch structuredSearch;
   @override
   String get id => 'find_poi';
   @override
@@ -26,7 +31,46 @@ class FindPoiCapability implements QueryCapability {
         detail: 'Ratings are not included in the downloaded place data yet.',
       );
     }
+    final placeQuery = plan.placeQuery;
+    if (placeQuery?.openNow == true) {
+      return const LocalQueryResult(
+        status: QueryResultStatus.unavailable,
+        detail:
+            'The downloaded place data does not include reliable opening hours, so I cannot verify what is open now.',
+      );
+    }
     var points = plan.candidatePois;
+    if (points.isEmpty && placeQuery != null) {
+      final origin = context.origin;
+      if (origin == null) {
+        return const LocalQueryResult(status: QueryResultStatus.unavailable);
+      }
+      final outcome = await structuredSearch.search(
+        origin,
+        placeQuery,
+        radiusMeters: (plan.radiusMiles ?? 15) * _metersPerMile,
+      );
+      final limited = outcome.matches
+          .take(plan.limit)
+          .map((value) => value.place)
+          .toList(growable: false);
+      if (limited.isEmpty) {
+        return LocalQueryResult(
+          status: QueryResultStatus.empty,
+          alternativePoi: outcome.alternative,
+          candidatesRetrieved: outcome.retrievedCount,
+          candidatesMatched: 0,
+        );
+      }
+      return LocalQueryResult(
+        status: QueryResultStatus.success,
+        places: limited,
+        selectedPoi: plan.limit == 1 ? limited.first : null,
+        candidatesRetrieved: outcome.retrievedCount,
+        candidatesMatched: outcome.matches.length,
+        selectedMatchScore: outcome.matches.first.score,
+      );
+    }
     if (points.isEmpty) {
       final origin = context.origin;
       if (origin == null) {
@@ -151,6 +195,15 @@ class NavigationCapability implements QueryCapability {
     QueryExecutionContext context,
   ) async {
     var selected = plan.selectedPoi;
+    if (selected == null && plan.candidatePois.isNotEmpty) {
+      final candidates = [...plan.candidatePois]
+        ..sort(
+          (a, b) => (a.distanceMeters ?? double.infinity).compareTo(
+            b.distanceMeters ?? double.infinity,
+          ),
+        );
+      selected = candidates.first;
+    }
     if (selected == null && plan.name != null && context.origin != null) {
       final matches = await nearby.search(
         context.origin!,

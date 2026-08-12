@@ -19,6 +19,7 @@ class VisitTracker {
     this.minimumObservations = 3,
     this.ambiguityMarginMeters = 20,
     this.onObservation,
+    this.onLocation,
   });
 
   final LocationService _locationService;
@@ -30,6 +31,7 @@ class VisitTracker {
   final int minimumObservations;
   final double ambiguityMarginMeters;
   final Future<void> Function(DateTime at)? onObservation;
+  final Future<void> Function(Coordinates coordinates, DateTime at)? onLocation;
 
   Timer? _timer;
   StreamSubscription<Coordinates>? _locationSubscription;
@@ -74,12 +76,11 @@ class VisitTracker {
           .listen(
             (coordinates) {
               final now = DateTime.now();
-              _enqueue(
-                () => recordObservation(
-                  coordinates,
-                  now,
-                ).whenComplete(() => onObservation?.call(now)),
-              );
+              _enqueue(() async {
+                await onLocation?.call(coordinates, now);
+                await recordObservation(coordinates, now);
+                await onObservation?.call(now);
+              });
             },
             onError: (Object error) {
               unawaited(
@@ -131,11 +132,10 @@ class VisitTracker {
     if (_observing) return;
     _observing = true;
     try {
-      await recordObservation(
-        await _locationService.currentLocation(),
-        DateTime.now(),
-      );
-      await onObservation?.call(DateTime.now());
+      final coordinates = await _locationService.currentLocation();
+      final now = DateTime.now();
+      await recordObservation(coordinates, now);
+      await onObservation?.call(now);
     } catch (error, stackTrace) {
       await _diagnostic('foreground_poll_error', _safeError(error));
       if (kDebugMode) {

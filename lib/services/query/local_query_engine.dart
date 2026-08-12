@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../core/models/geo.dart';
 import '../../core/models/local_query.dart';
 import 'conversation_context.dart';
@@ -58,11 +60,43 @@ class LocalQueryEngine {
         QueryExecutionContext(origin: origin),
       );
     }
-    context.remember(plan.intent, result);
+    if (kDebugMode) _logQuery(text, parsed, plan, result);
+    context.remember(plan, result);
     return QueryAnswer(
       text: responseGenerator.generate(plan, result),
       plan: plan,
       result: result,
     );
+  }
+
+  void _logQuery(
+    String text,
+    ParsedQuery parsed,
+    QueryPlan plan,
+    LocalQueryResult result,
+  ) {
+    final place = plan.placeQuery;
+    final selected = result.selectedPoi;
+    debugPrint('''
+Voice text:
+$text
+
+Parsed intent:
+action=${parsed.intent.name}
+category=${place?.category}
+brand=${place?.brand}
+searchTerm=${place?.searchTerm}
+openNow=${place?.openNow}
+sort=${place?.sort.name}
+limit=${place?.limit ?? plan.limit}
+
+Candidates retrieved: ${result.candidatesRetrieved ?? 'n/a'}
+Candidates after filtering: ${result.candidatesMatched ?? 'n/a'}
+
+Selected:
+${selected?.name ?? 'none'}
+distance=${selected?.distanceMeters == null ? 'n/a' : '${(selected!.distanceMeters! / 1609.344).toStringAsFixed(1)} miles'}
+matchScore=${result.selectedMatchScore ?? 'n/a'}
+''');
   }
 }

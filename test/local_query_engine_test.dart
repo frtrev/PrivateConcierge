@@ -150,4 +150,163 @@ void main() {
     expect(answer.result.status, QueryResultStatus.unavailable);
     expect(answer.text, contains('Ratings are not included'));
   });
+
+  test('closest BP never selects an unrelated closer place', () async {
+    final answer = await makeEngine(
+      points: const [
+        PointOfInterest(
+          id: 'brady',
+          regionId: 'r',
+          name: 'Brady Bunch House',
+          coordinates: Coordinates(35.0001, -90),
+          category: 'gas',
+          subcategory: 'landmark',
+          address: 'Very close',
+        ),
+        PointOfInterest(
+          id: 'bp',
+          regionId: 'r',
+          name: 'BP Fuel',
+          coordinates: Coordinates(35.02, -90),
+          category: 'gas',
+          subcategory: 'gas_station',
+          address: 'Farther away',
+        ),
+      ],
+    ).answer("Where's the closest BP?", origin: origin);
+    expect(answer.result.status, QueryResultStatus.success);
+    expect(answer.result.selectedPoi?.id, 'bp');
+    expect(
+      answer.result.places.map((place) => place.id),
+      isNot(contains('brady')),
+    );
+  });
+
+  test('missing BP is explicit and labels Shell as an alternative', () async {
+    final answer = await makeEngine(
+      points: const [
+        PointOfInterest(
+          id: 'shell',
+          regionId: 'r',
+          name: 'Shell',
+          coordinates: Coordinates(35.01, -90),
+          category: 'gas',
+          subcategory: 'gas_station',
+          address: '1 Fuel Way',
+        ),
+      ],
+    ).answer("Where's the closest BP?", origin: origin);
+    expect(answer.result.status, QueryResultStatus.empty);
+    expect(answer.result.selectedPoi, isNull);
+    expect(answer.result.alternativePoi?.id, 'shell');
+    expect(answer.text, contains("couldn't find a BP"));
+    expect(answer.text, contains('closest gas station is Shell'));
+  });
+
+  test('open-now constraint is never silently discarded', () async {
+    final answer = await makeEngine().answer(
+      "Find a BP that's open.",
+      origin: origin,
+    );
+    expect(answer.result.status, QueryResultStatus.unavailable);
+    expect(answer.text, contains('opening hours'));
+  });
+
+  test('map follow-up navigates to the exact previous BP result', () async {
+    final engine = makeEngine(
+      points: const [
+        PointOfInterest(
+          id: 'bp-follow-up',
+          regionId: 'r',
+          name: 'BP',
+          coordinates: Coordinates(35.02, -90),
+          category: 'gas',
+          subcategory: 'gas_station',
+          address: '2 Fuel Way',
+        ),
+      ],
+    );
+    final found = await engine.answer(
+      "Where's the closest BP?",
+      origin: origin,
+    );
+    final navigation = await engine.answer('Open it in maps.', origin: origin);
+    expect(found.result.selectedPoi?.id, 'bp-follow-up');
+    expect(navigation.result.navigationRequested, isTrue);
+    expect(navigation.result.selectedPoi?.id, found.result.selectedPoi?.id);
+    expect(navigation.plan.placeQuery?.brand, 'BP');
+  });
+
+  test(
+    'restaurant list follow-ups retain selection through navigation',
+    () async {
+      final engine = makeEngine(
+        points: const [
+          PointOfInterest(
+            id: 'mexican-near',
+            regionId: 'r',
+            name: 'Casa Near',
+            coordinates: Coordinates(35.001, -90),
+            category: 'restaurant',
+            subcategory: 'mexican restaurant',
+            address: '1 Taco Lane',
+          ),
+          PointOfInterest(
+            id: 'mexican-far',
+            regionId: 'r',
+            name: 'Casa Far',
+            coordinates: Coordinates(35.01, -90),
+            category: 'restaurant',
+            subcategory: 'mexican restaurant',
+            address: '9 Taco Lane',
+          ),
+        ],
+      );
+      final list = await engine.answer(
+        'Show me nearby Mexican restaurants.',
+        origin: origin,
+      );
+      final closest = await engine.answer(
+        'Which one is closest?',
+        origin: origin,
+      );
+      final navigation = await engine.answer('Navigate there.', origin: origin);
+      expect(list.result.places, hasLength(2));
+      expect(closest.result.selectedPoi?.id, 'mexican-near');
+      expect(navigation.result.selectedPoi?.id, 'mexican-near');
+      expect(navigation.result.navigationRequested, isTrue);
+    },
+  );
+
+  test('Starbucks result survives show-it-on-map follow-up', () async {
+    final engine = makeEngine(
+      points: const [
+        PointOfInterest(
+          id: 'closer-cafe',
+          regionId: 'r',
+          name: 'Closer Cafe',
+          coordinates: Coordinates(35.0001, -90),
+          category: 'restaurant',
+          subcategory: 'coffee_shop',
+          address: '1 Coffee Way',
+        ),
+        PointOfInterest(
+          id: 'starbucks',
+          regionId: 'r',
+          name: 'Starbucks',
+          coordinates: Coordinates(35.005, -90),
+          category: 'restaurant',
+          subcategory: 'coffee_shop',
+          address: '5 Coffee Way',
+        ),
+      ],
+    );
+    await engine.answer('Find a Starbucks.', origin: origin);
+    final navigation = await engine.answer(
+      'Show it on the map.',
+      origin: origin,
+    );
+    expect(navigation.result.selectedPoi?.id, 'starbucks');
+    expect(navigation.result.navigationRequested, isTrue);
+  });
 }

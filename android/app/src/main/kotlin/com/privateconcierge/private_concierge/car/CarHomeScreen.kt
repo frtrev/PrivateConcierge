@@ -1,4 +1,4 @@
-package com.privateconcierge.private_concierge.car
+package com.neotheone.privateconcierge.car
 
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
@@ -11,7 +11,9 @@ import androidx.car.app.model.ListTemplate
 class CarHomeScreen(carContext: CarContext) : Screen(carContext) {
     override fun onGetTemplate(): Template {
         val list = ItemList.Builder()
-            .addItem(Row.Builder().setTitle("Assistant").addText("Use the same private assistant pipeline").setOnClickListener { screenManager.push(CarMessageScreen(carContext, "Assistant", "Voice handoff architecture is ready; use the phone microphone in this milestone.")) }.build())
+            .addItem(Row.Builder().setTitle("Talk to Charon").addText("Use voice or type a request").setOnClickListener {
+                screenManager.push(CarVoiceSearchScreen(carContext))
+            }.build())
             .addItem(Row.Builder().setTitle("Nearby").addText("Food, gas, historic, parks, churches, and gyms").setOnClickListener { screenManager.push(NearbyCategoriesScreen(carContext)) }.build())
             .addItem(Row.Builder().setTitle("Reminders").addText("Coming later").build())
             .addItem(Row.Builder().setTitle("My Places").addText("Coming later").build())

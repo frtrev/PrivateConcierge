@@ -1,4 +1,5 @@
 import '../../core/models/local_query.dart';
+import '../../core/models/place_query.dart';
 import '../../core/models/poi.dart';
 
 class ConversationSnapshot {
@@ -7,17 +8,19 @@ class ConversationSnapshot {
     required this.intent,
     required this.results,
     this.selectedPoi,
+    this.placeQuery,
   });
 
   final DateTime createdAt;
   final LocalQueryIntent intent;
   final List<PointOfInterest> results;
   final PointOfInterest? selectedPoi;
+  final PlaceQuery? placeQuery;
 }
 
 abstract interface class ConversationContext {
   ConversationSnapshot? get current;
-  void remember(LocalQueryIntent intent, LocalQueryResult result);
+  void remember(QueryPlan plan, LocalQueryResult result);
   void clear();
 }
 
@@ -44,7 +47,7 @@ class BoundedConversationContext implements ConversationContext {
   }
 
   @override
-  void remember(LocalQueryIntent intent, LocalQueryResult result) {
+  void remember(QueryPlan plan, LocalQueryResult result) {
     if (result.status != QueryResultStatus.success) return;
     final previous = current;
     final results = result.places.isEmpty
@@ -52,9 +55,14 @@ class BoundedConversationContext implements ConversationContext {
         : result.places;
     _snapshot = ConversationSnapshot(
       createdAt: _clock(),
-      intent: intent,
+      intent: plan.intent,
       results: List.unmodifiable(results.take(maxResults)),
-      selectedPoi: result.selectedPoi ?? previous?.selectedPoi,
+      selectedPoi:
+          result.selectedPoi ??
+          (result.places.length == 1
+              ? result.places.first
+              : previous?.selectedPoi),
+      placeQuery: plan.placeQuery ?? previous?.placeQuery,
     );
   }
 
@@ -72,7 +80,11 @@ class QueryContextResolver {
       intent: query.intent,
       operation: query.operation,
       confidence: query.confidence,
-      category: query.category,
+      category:
+          query.category ??
+          ((query.usesPreviousResults || query.usesPreviousSelection)
+              ? snapshot?.placeQuery?.category
+              : null),
       name: query.name,
       secondName: query.secondName,
       radiusMiles: query.radiusMiles,
@@ -81,6 +93,11 @@ class QueryContextResolver {
           ? snapshot?.results ?? const []
           : const [],
       selectedPoi: query.usesPreviousSelection ? snapshot?.selectedPoi : null,
+      placeQuery:
+          query.placeQuery ??
+          ((query.usesPreviousResults || query.usesPreviousSelection)
+              ? snapshot?.placeQuery
+              : null),
     );
   }
 }

@@ -1,87 +1,164 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
+import 'package:geocoding/geocoding.dart';
+import 'package:http/http.dart' as http;
+
 import '../../core/models/geo.dart';
 import '../../core/models/region.dart';
 
 abstract interface class RegionResolver {
   Future<Region?> resolve(Coordinates coordinates);
+  Future<List<Region>> options(Coordinates coordinates);
 }
 
-class BundledRegionResolver implements RegionResolver {
-  BundledRegionResolver([List<Region>? regions])
-    : regions = regions ?? bundledRegions;
-  final List<Region> regions;
+abstract interface class AreaLabelResolver {
+  Future<AreaLabel> label(Coordinates coordinates);
+}
+
+class AreaLabel {
+  const AreaLabel(this.city, this.administrativeArea, this.country);
+  final String city;
+  final String administrativeArea;
+  final String country;
+}
+
+class DeviceAreaLabelResolver implements AreaLabelResolver {
+  DeviceAreaLabelResolver({Geocoding? geocoding})
+    : _geocoding = geocoding ?? Geocoding();
+  final Geocoding _geocoding;
+
   @override
-  Future<Region?> resolve(Coordinates coordinates) async {
-    for (final region in regions) {
-      if (region.bounds.contains(coordinates)) return region;
+  Future<AreaLabel> label(Coordinates coordinates) async {
+    try {
+      final values = await _geocoding.placemarkFromCoordinates(
+        coordinates.latitude,
+        coordinates.longitude,
+      );
+      final place = values.first;
+      final city = _firstNonEmpty([
+        place.locality,
+        place.subAdministrativeArea,
+        place.administrativeArea,
+      ]);
+      return AreaLabel(
+        city ?? 'Current location',
+        place.administrativeArea ?? '',
+        place.isoCountryCode ?? place.country ?? '',
+      );
+    } catch (_) {
+      return const AreaLabel('Current location', '', '');
+    }
+  }
+
+  String? _firstNonEmpty(List<String?> values) {
+    for (final value in values) {
+      if (value != null && value.trim().isNotEmpty) return value.trim();
     }
     return null;
   }
 }
 
-final bundledRegions = <Region>[
-  Region(
-    id: 'us-tn-memphis-50mi',
-    name: 'Memphis',
-    administrativeArea: 'Tennessee',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 34.376,
-      west: -90.484,
-      north: 35.824,
-      east: -88.716,
-    ),
-    version: 2026080902,
-    downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/39cb6b4a332b74e9f0ba381f3ae22cdfd4f55763/assets/overture/us-tn-memphis-50mi.jsonl.gz',
-    ),
-    approximateBytes: 3420539,
-    coverageMiles: 50,
-    approximatePoiCount: 58453,
-  ),
-  Region(
-    id: 'us-tn-memphis-100mi',
-    name: 'Memphis',
-    administrativeArea: 'Tennessee',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 33.70,
-      west: -91.67,
-      north: 36.60,
-      east: -88.13,
-    ),
-    version: 2026080902,
-    downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/39cb6b4a332b74e9f0ba381f3ae22cdfd4f55763/assets/overture/us-tn-memphis-100mi.jsonl.gz',
-    ),
-    approximateBytes: 6735068,
-    coverageMiles: 100,
-    approximatePoiCount: 114715,
-  ),
-  Region(
-    id: 'us-tn-memphis-150mi',
-    name: 'Memphis',
-    administrativeArea: 'Tennessee',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 32.98,
-      west: -92.56,
-      north: 37.32,
-      east: -87.24,
-    ),
-    version: 2026080902,
-    downloadUrl: Uri.parse(
-      'https://raw.githubusercontent.com/frtrev/PrivateConcierge/39cb6b4a332b74e9f0ba381f3ae22cdfd4f55763/assets/overture/us-tn-memphis-150mi.jsonl.gz',
-    ),
-    approximateBytes: 12940421,
-    coverageMiles: 150,
-    approximatePoiCount: 219574,
-  ),
-];
+abstract interface class OvertureReleaseResolver {
+  Future<String> latest();
+}
 
-const legacyRegionIds = {'us-tn-memphis', 'us-tn-nashville', 'us-tx-dallas'};
+class StacOvertureReleaseResolver implements OvertureReleaseResolver {
+  StacOvertureReleaseResolver({http.Client? client})
+    : _client = client ?? http.Client();
+  final http.Client _client;
+  static const fallbackRelease = '2026-07-22.0';
 
-List<Region> downloadOptionsFor(Coordinates coordinates) =>
-    bundledRegions
-        .where((region) => region.bounds.contains(coordinates))
-        .toList()
-      ..sort((a, b) => a.coverageMiles.compareTo(b.coverageMiles));
+  @override
+  Future<String> latest() async {
+    try {
+      final response = await _client
+          .get(Uri.parse('https://stac.overturemaps.org/catalog.json'))
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return fallbackRelease;
+      final value =
+          (jsonDecode(response.body) as Map<String, dynamic>)['latest'];
+      return value is String && value.isNotEmpty ? value : fallbackRelease;
+    } catch (_) {
+      return fallbackRelease;
+    }
+  }
+}
+
+class LocationRegionResolver implements RegionResolver {
+  LocationRegionResolver({
+    AreaLabelResolver? labels,
+    OvertureReleaseResolver? releases,
+  }) : _labels = labels ?? DeviceAreaLabelResolver(),
+       _releases = releases ?? StacOvertureReleaseResolver();
+  final AreaLabelResolver _labels;
+  final OvertureReleaseResolver _releases;
+
+  @override
+  Future<Region?> resolve(Coordinates coordinates) async =>
+      (await options(coordinates)).first;
+
+  @override
+  Future<List<Region>> options(Coordinates coordinates) async {
+    final results = await Future.wait([
+      _labels.label(coordinates),
+      _releases.latest(),
+    ]);
+    final label = results[0] as AreaLabel;
+    final release = results[1] as String;
+    return [
+      50,
+      100,
+      150,
+    ].map((miles) => _region(coordinates, label, release, miles)).toList();
+  }
+
+  Region _region(
+    Coordinates center,
+    AreaLabel label,
+    String release,
+    int miles,
+  ) {
+    final latitudeDelta = miles / 69.0;
+    final longitudeDelta =
+        miles /
+        (69.172 *
+            math.max(.15, math.cos(center.latitude * math.pi / 180).abs()));
+    final coordinateKey =
+        '${center.latitude.toStringAsFixed(3)}_${center.longitude.toStringAsFixed(3)}'
+            .replaceAll('-', 'm')
+            .replaceAll('.', 'p');
+    return Region(
+      id: 'overture-$coordinateKey-${miles}mi',
+      name: label.city,
+      administrativeArea: label.administrativeArea,
+      country: label.country,
+      center: center,
+      bounds: GeoBounds(
+        south: center.latitude - latitudeDelta,
+        west: center.longitude - longitudeDelta,
+        north: center.latitude + latitudeDelta,
+        east: center.longitude + longitudeDelta,
+      ),
+      version: _versionOf(release),
+      release: release,
+      downloadUrl: Uri.parse(
+        'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/$release/places.pmtiles',
+      ),
+      approximateBytes: miles * miles * 11500,
+      coverageMiles: miles,
+    );
+  }
+
+  int _versionOf(String release) =>
+      int.tryParse(release.replaceAll(RegExp('[^0-9]'), '')) ?? 1;
+}
+
+const legacyRegionIds = {
+  'us-tn-memphis',
+  'us-tn-memphis-50mi',
+  'us-tn-memphis-100mi',
+  'us-tn-memphis-150mi',
+  'us-tn-nashville',
+  'us-tx-dallas',
+};

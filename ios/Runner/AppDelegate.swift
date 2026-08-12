@@ -9,6 +9,8 @@ import UIKit
   private var speechHandler: IosOnDeviceSpeechHandler?
   private var navigationChannel: FlutterMethodChannel?
   private var visitMonitoringHandler: IosVisitMonitoringHandler?
+  private var carChannel: FlutterMethodChannel?
+  private var pendingTalkRequest = false
 
   override func application(
     _ application: UIApplication,
@@ -22,6 +24,28 @@ import UIKit
     guard let registrar = engineBridge.pluginRegistry.registrar(
       forPlugin: "IosOnDeviceSpeech"
     ) else { return }
+    carChannel = FlutterMethodChannel(
+      name: "charon/car",
+      binaryMessenger: registrar.messenger()
+    )
+    carChannel?.setMethodCallHandler { [weak self] call, result in
+      if call.method == "publishResult",
+        let payload = call.arguments as? [String: Any]
+      {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.show(payload: payload)
+        }
+        result(true)
+        return
+      }
+      guard call.method == "consumeTalkRequest" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let pending = self?.pendingTalkRequest ?? false
+      self?.pendingTalkRequest = false
+      result(pending)
+    }
     speechHandler = IosOnDeviceSpeechHandler(
       messenger: registrar.messenger()
     )
@@ -53,6 +77,23 @@ import UIKit
       }
       UIApplication.shared.open(url, options: [:]) { opened in result(opened) }
     }
+  }
+
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    guard url.scheme == "charon", url.host == "talk" else {
+      return super.application(app, open: url, options: options)
+    }
+    requestTalkFromCar()
+    return true
+  }
+
+  func requestTalkFromCar() {
+    pendingTalkRequest = true
+    carChannel?.invokeMethod("talkRequested", arguments: nil)
   }
 }
 
