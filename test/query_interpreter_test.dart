@@ -67,6 +67,14 @@ void main() {
     expect(directNavigation.category, 'restaurant');
   });
 
+  test('affirmative answers navigate to the selected place', () {
+    for (final phrase in ['yes', 'yes please', 'sure', 'go ahead']) {
+      final result = interpreter.interpret(phrase);
+      expect(result.intent, LocalQueryIntent.navigate, reason: phrase);
+      expect(result.usesPreviousSelection, isTrue, reason: phrase);
+    }
+  });
+
   test('does not invent an intent for unrelated or malformed input', () {
     expect(
       interpreter.interpret('purple seventeen').intent,

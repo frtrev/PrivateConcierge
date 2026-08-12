@@ -399,7 +399,10 @@ private final class IosOnDeviceSpeechHandler: NSObject {
     }
   }
 
-  private func startListening(result: @escaping FlutterResult) {
+  private func startListening(
+    result: @escaping FlutterResult,
+    retryCount: Int = 0
+  ) {
     guard let recognizer,
       recognizer.supportsOnDeviceRecognition
     else {
@@ -413,7 +416,9 @@ private final class IosOnDeviceSpeechHandler: NSObject {
       return
     }
     do {
+      resetRecognitionAudio()
       let session = AVAudioSession.sharedInstance()
+      try? session.setActive(false, options: .notifyOthersOnDeactivation)
       try session.setCategory(
         .playAndRecord,
         mode: .voiceChat,
@@ -431,8 +436,32 @@ private final class IosOnDeviceSpeechHandler: NSObject {
         self?.beginRecognition(recognizer: recognizer, result: result)
       }
     } catch {
-      finish(error: error.localizedDescription, fallbackResult: result)
+      if retryCount == 0 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+          self?.startListening(result: result, retryCount: 1)
+        }
+      } else {
+        finish(error: error.localizedDescription, fallbackResult: result)
+      }
     }
+  }
+
+  private func resetRecognitionAudio() {
+    timeoutWorkItem?.cancel()
+    timeoutWorkItem = nil
+    silenceWorkItem?.cancel()
+    silenceWorkItem = nil
+    recognitionRequest?.endAudio()
+    recognitionTask?.cancel()
+    recognitionRequest = nil
+    recognitionTask = nil
+    if audioEngine.isRunning { audioEngine.stop() }
+    if hasAudioTap {
+      audioEngine.inputNode.removeTap(onBus: 0)
+      hasAudioTap = false
+    }
+    audioEngine.reset()
+    latestTranscription = ""
   }
 
   private func beginRecognition(
@@ -516,19 +545,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
   ) {
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      timeoutWorkItem?.cancel()
-      timeoutWorkItem = nil
-      silenceWorkItem?.cancel()
-      silenceWorkItem = nil
-      recognitionRequest?.endAudio()
-      recognitionTask?.cancel()
-      recognitionRequest = nil
-      recognitionTask = nil
-      if audioEngine.isRunning { audioEngine.stop() }
-      if hasAudioTap {
-        audioEngine.inputNode.removeTap(onBus: 0)
-        hasAudioTap = false
-      }
+      resetRecognitionAudio()
       try? AVAudioSession.sharedInstance().setActive(
         false,
         options: .notifyOthersOnDeactivation

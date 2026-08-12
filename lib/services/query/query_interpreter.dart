@@ -16,6 +16,18 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
     final normalized = PlaceVocabulary.normalize(text);
     if (normalized.isEmpty) return _unknown(text);
 
+    if (RegExp(
+      r'^(yes|yes please|sure|okay|ok|please do|go ahead|take me there)$',
+    ).hasMatch(normalized)) {
+      return ParsedQuery(
+        intent: LocalQueryIntent.navigate,
+        originalText: text,
+        confidence: .98,
+        usesPreviousSelection: true,
+        limit: 1,
+      );
+    }
+
     final refersToSelection = RegExp(
       r'\b(there|it|that place)\b',
     ).hasMatch(normalized);

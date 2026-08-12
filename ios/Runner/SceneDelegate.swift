@@ -75,15 +75,19 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 }
 
 @available(iOS 14.0, *)
-final class CarPlaySessionCoordinator {
+final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   static let shared = CarPlaySessionCoordinator()
   private weak var interfaceController: CPInterfaceController?
   private weak var carPlayScene: CPTemplateApplicationScene?
   private var homeTemplate: CPTemplate?
   private var latestPayload: [String: Any]?
   private let speechSynthesizer = AVSpeechSynthesizer()
+  private var listenAfterSpeech = false
 
-  private init() {}
+  private override init() {
+    super.init()
+    speechSynthesizer.delegate = self
+  }
 
   func connect(
     _ interfaceController: CPInterfaceController,
@@ -186,11 +190,32 @@ final class CarPlaySessionCoordinator {
     let response = payload["spokenResponse"] as? String
       ?? payload["response"] as? String
       ?? "Charon finished the request."
-    speechSynthesizer.stopSpeaking(at: .immediate)
-    CarAudioCuePlayer.shared.playResponseCue { [weak self] in
-      self?.speechSynthesizer.speak(AVSpeechUtterance(string: response))
-    }
     let places = payload["places"] as? [[String: Any]] ?? []
+    let isNavigation = payload["type"] as? String == "navigation"
+    listenAfterSpeech = response.trimmingCharacters(in: .whitespacesAndNewlines)
+      .hasSuffix("?")
+    speechSynthesizer.stopSpeaking(at: .immediate)
+    if isNavigation {
+      listenAfterSpeech = false
+      releaseResponseAudioRoute()
+      if let place = places.first {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+          self?.navigate(to: place)
+        }
+      }
+    } else {
+      prepareResponseAudioRoute()
+      CarAudioCuePlayer.shared.playResponseCue { [weak self] in
+        // CarPlay/HFP needs a moment after acquiring the route. Without this
+        // guard interval, the head unit can clip the first spoken words.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
+          guard let self else { return }
+          let utterance = AVSpeechUtterance(string: response)
+          utterance.preUtteranceDelay = 0.15
+          self.speechSynthesizer.speak(utterance)
+        }
+      }
+    }
     let actions = payload["actions"] as? [[String: Any]] ?? []
     if let place = places.first,
       actions.contains(where: { $0["type"] as? String == "call" }),
@@ -201,12 +226,49 @@ final class CarPlaySessionCoordinator {
         UIApplication.shared.open(url)
       }
     }
-    if payload["type"] as? String == "navigation", let place = places.first {
-      navigate(to: place)
-    }
     let list = CPListSection(items: resultItems(response: response, places: places))
     let template = CPListTemplate(title: "Charon", sections: [list])
     interfaceController.setRootTemplate(template, animated: true, completion: nil)
+  }
+
+  func speechSynthesizer(
+    _ synthesizer: AVSpeechSynthesizer,
+    didFinish utterance: AVSpeechUtterance
+  ) {
+    guard listenAfterSpeech else {
+      releaseResponseAudioRoute()
+      return
+    }
+    listenAfterSpeech = false
+    showMessage(
+      "Your turn…",
+      detail: "Charon will listen after the tone."
+    )
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+      (UIApplication.shared.delegate as? AppDelegate)?.requestTalkFromCar()
+    }
+  }
+
+  private func prepareResponseAudioRoute() {
+    let session = AVAudioSession.sharedInstance()
+    try? session.setCategory(
+      .playAndRecord,
+      mode: .voiceChat,
+      options: [.duckOthers, .allowBluetoothHFP]
+    )
+    try? session.setActive(true, options: .notifyOthersOnDeactivation)
+    if let carInput = session.availableInputs?.first(where: {
+      $0.portType == .carAudio || $0.portType == .bluetoothHFP
+    }) {
+      try? session.setPreferredInput(carInput)
+    }
+  }
+
+  private func releaseResponseAudioRoute() {
+    try? AVAudioSession.sharedInstance().setActive(
+      false,
+      options: .notifyOthersOnDeactivation
+    )
   }
 
   private func resultItems(
@@ -307,7 +369,9 @@ final class CarPlaySessionCoordinator {
         with: [MKMapItem.forCurrentLocation(), item],
         launchOptions: options,
         from: carPlayScene,
-        completionHandler: nil
+        // iOS 26.6 invokes this callback unconditionally after handing the
+        // route to Maps. Passing nil causes an asynchronous MapKit crash.
+        completionHandler: { _ in }
       )
     } else {
       item.openInMaps(launchOptions: options)

@@ -32,6 +32,19 @@ class AssistantEngine {
   final PlaceDetailFollowUpResolver placeDetails;
 
   Future<AssistantResult> answer(String text) async {
+    final normalized = text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z ]'), ' ')
+        .trim();
+    if (RegExp(r'^(no|no thanks|not now|cancel)$').hasMatch(normalized) &&
+        queries.context.current?.selectedPoi != null) {
+      return const AssistantResult(
+        response: 'Okay. I will not start directions.',
+        spokenResponse: 'Okay. I will not start directions.',
+        type: AssistantResultType.message,
+        context: AssistantConversationState(lastIntent: 'declinedFollowUp'),
+      );
+    }
     final detailAnswer = _placeDetailFollowUp(text);
     if (detailAnswer != null) return detailAnswer;
     final answer = await queries.answer(text, origin: bootstrap.coordinates);

@@ -113,6 +113,10 @@ void main() {
       final navigation = await engine.answer('Take me there', origin: origin);
       expect(navigation.result.navigationRequested, isTrue);
       expect(navigation.result.selectedPoi?.id, 'near');
+
+      final affirmative = await engine.answer('Yes please', origin: origin);
+      expect(affirmative.result.navigationRequested, isTrue);
+      expect(affirmative.result.selectedPoi?.id, 'near');
     },
   );
 
