@@ -12,6 +12,9 @@ import UIKit
   private var visitMonitoringHandler: IosVisitMonitoringHandler?
   private var carChannel: FlutterMethodChannel?
   private var pendingTalkRequest = false
+  private var carVoiceTurnActive = false
+  private var carVoiceBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+  private var carVoiceTimeout: DispatchWorkItem?
 
   override func application(
     _ application: UIApplication,
@@ -135,11 +138,21 @@ import UIKit
   }
 
   func requestTalkFromCar() {
-    guard let speechHandler, let carChannel else {
-      pendingTalkRequest = true
-      self.carChannel?.invokeMethod("talkRequested", arguments: nil)
+    guard !carVoiceTurnActive else {
+      if #available(iOS 14.0, *) {
+        CarPlaySessionCoordinator.shared.showBusy()
+      }
       return
     }
+    guard let speechHandler, let carChannel else {
+      if #available(iOS 14.0, *) {
+        CarPlaySessionCoordinator.shared.showRecognitionError(
+          "Charon is still starting. Please wait a moment and try again."
+        )
+      }
+      return
+    }
+    beginCarVoiceTurn()
     if #available(iOS 14.0, *) {
       CarPlaySessionCoordinator.shared.showStarting()
     }
@@ -149,6 +162,7 @@ import UIKit
         if #available(iOS 14.0, *) {
           CarPlaySessionCoordinator.shared.showRecognitionError(error)
         }
+        self.endCarVoiceTurn()
         return
       }
       guard let text, !text.isEmpty else {
@@ -157,12 +171,14 @@ import UIKit
             "I didn't hear anything. Please try again."
           )
         }
+        self.endCarVoiceTurn()
         return
       }
       if #available(iOS 14.0, *) {
         CarPlaySessionCoordinator.shared.showThinking(transcript: text)
       }
       carChannel.invokeMethod("submitRecognizedText", arguments: text) { result in
+        defer { self.endCarVoiceTurn() }
         if let payload = result as? [String: Any] {
           if #available(iOS 14.0, *) {
             CarPlaySessionCoordinator.shared.show(payload: payload)
@@ -173,6 +189,43 @@ import UIKit
           )
         }
       }
+    }
+  }
+
+  private func beginCarVoiceTurn() {
+    carVoiceTurnActive = true
+    carVoiceBackgroundTask = UIApplication.shared.beginBackgroundTask(
+      withName: "CharonCarVoiceTurn"
+    ) { [weak self] in
+      guard let self else { return }
+      if #available(iOS 14.0, *) {
+        CarPlaySessionCoordinator.shared.showRecognitionError(
+          "The request took too long. Please try again."
+        )
+      }
+      self.endCarVoiceTurn()
+    }
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self, self.carVoiceTurnActive else { return }
+      if #available(iOS 14.0, *) {
+        CarPlaySessionCoordinator.shared.showRecognitionError(
+          "Charon didn't receive a response in time. Please try again."
+        )
+      }
+      self.endCarVoiceTurn()
+    }
+    carVoiceTimeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: timeout)
+  }
+
+  private func endCarVoiceTurn() {
+    carVoiceTimeout?.cancel()
+    carVoiceTimeout = nil
+    carVoiceTurnActive = false
+    let task = carVoiceBackgroundTask
+    carVoiceBackgroundTask = .invalid
+    if task != .invalid {
+      UIApplication.shared.endBackgroundTask(task)
     }
   }
 }

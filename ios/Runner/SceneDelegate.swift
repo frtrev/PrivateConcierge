@@ -104,6 +104,13 @@ final class CarPlaySessionCoordinator {
     showMessage("Starting microphone…", detail: "Charon is connecting to the car audio input.")
   }
 
+  func showBusy() {
+    showMessage(
+      "Charon is already listening…",
+      detail: "Finish the current request or wait for it to time out."
+    )
+  }
+
   func showThinking(transcript: String) {
     showMessage("Thinking…", detail: "You said: \(transcript)")
   }
