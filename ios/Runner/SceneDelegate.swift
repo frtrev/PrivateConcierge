@@ -28,7 +28,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) { _ in
       (UIApplication.shared.delegate as? AppDelegate)?.requestTalkFromCar()
     }
-    let template = CPGridTemplate(title: "Charon", gridButtons: [talk])
+    let template = CPGridTemplate(title: "Private Concierge", gridButtons: [talk])
     interfaceController.setRootTemplate(template, animated: false, completion: nil)
     CarPlaySessionCoordinator.shared.connect(
       interfaceController,
@@ -83,6 +83,8 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   private var latestPayload: [String: Any]?
   private let speechSynthesizer = AVSpeechSynthesizer()
   private var listenAfterSpeech = false
+  private var changingRootTemplate = false
+  private var pendingRootTemplate: CPTemplate?
 
   private override init() {
     super.init()
@@ -151,9 +153,9 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   }
 
   func showHome() {
-    guard let interfaceController, let homeTemplate else { return }
+    guard let homeTemplate else { return }
     latestPayload = nil
-    interfaceController.setRootTemplate(homeTemplate, animated: true, completion: nil)
+    setRootTemplate(homeTemplate, animated: true)
   }
 
   private func showMessage(
@@ -178,10 +180,10 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
       items.append(goBack)
     }
     let template = CPListTemplate(
-      title: "Charon",
+      title: "Private Concierge",
       sections: [CPListSection(items: items)]
     )
-    interfaceController.setRootTemplate(template, animated: true, completion: nil)
+    setRootTemplate(template, animated: true)
   }
 
   func show(payload: [String: Any]) {
@@ -227,8 +229,25 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
       }
     }
     let list = CPListSection(items: resultItems(response: response, places: places))
-    let template = CPListTemplate(title: "Charon", sections: [list])
-    interfaceController.setRootTemplate(template, animated: true, completion: nil)
+    let template = CPListTemplate(title: "Private Concierge", sections: [list])
+    setRootTemplate(template, animated: true)
+  }
+
+  private func setRootTemplate(_ template: CPTemplate, animated: Bool) {
+    guard let interfaceController else { return }
+    if changingRootTemplate {
+      pendingRootTemplate = template
+      return
+    }
+    changingRootTemplate = true
+    interfaceController.setRootTemplate(template, animated: animated) {
+      [weak self] _, _ in
+      guard let self else { return }
+      self.changingRootTemplate = false
+      guard let pending = self.pendingRootTemplate else { return }
+      self.pendingRootTemplate = nil
+      self.setRootTemplate(pending, animated: false)
+    }
   }
 
   func speechSynthesizer(

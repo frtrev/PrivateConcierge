@@ -70,7 +70,7 @@ class CarAssistantResultScreen(
                 .build()
         }
         val template = MessageTemplate.Builder(response)
-            .setTitle("Charon")
+            .setTitle("Private Concierge")
             .setHeaderAction(Action.BACK)
         places.firstOrNull()?.let { place ->
             template.addAction(
