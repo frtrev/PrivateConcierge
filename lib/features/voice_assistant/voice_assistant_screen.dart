@@ -31,6 +31,7 @@ class VoiceAssistantScreen extends StatefulWidget {
 
 class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   static const _carChannel = MethodChannel('charon/car');
+  static const _placeActionChannel = MethodChannel('charon/place_actions');
   final textController = TextEditingController();
   VoiceRecognitionState state = VoiceRecognitionState.idle;
   String transcript = '';
@@ -106,6 +107,17 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     } on PlatformException {
       // The phone assistant remains usable when no vehicle session is active.
     }
+    final place = answer.selectedPlace;
+    if (place != null && answer.actions.isNotEmpty) {
+      final action = answer.actions.first;
+      if (action.type == AssistantActionType.call &&
+          place.phoneNumber != null) {
+        await _invokePlaceAction('call', place.phoneNumber!);
+      } else if (action.type == AssistantActionType.openWebsite &&
+          place.website != null) {
+        await _invokePlaceAction('openWebsite', place.website!);
+      }
+    }
     if (answer.type == AssistantResultType.navigation) {
       final place = selectedPlace;
       if (place != null) {
@@ -116,6 +128,14 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
       }
     }
     if (mounted) setState(() => state = VoiceRecognitionState.completed);
+  }
+
+  Future<void> _invokePlaceAction(String method, String value) async {
+    try {
+      await _placeActionChannel.invokeMethod<bool>(method, {'value': value});
+    } on PlatformException {
+      // The response still explains what data is available if launch fails.
+    }
   }
 
   @override

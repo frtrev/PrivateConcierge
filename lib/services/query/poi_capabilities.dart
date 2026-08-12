@@ -32,13 +32,6 @@ class FindPoiCapability implements QueryCapability {
       );
     }
     final placeQuery = plan.placeQuery;
-    if (placeQuery?.openNow == true) {
-      return const LocalQueryResult(
-        status: QueryResultStatus.unavailable,
-        detail:
-            'The downloaded place data does not include reliable opening hours, so I cannot verify what is open now.',
-      );
-    }
     var points = plan.candidatePois;
     if (points.isEmpty && placeQuery != null) {
       final origin = context.origin;
@@ -50,7 +43,25 @@ class FindPoiCapability implements QueryCapability {
         placeQuery,
         radiusMeters: (plan.radiusMiles ?? 15) * _metersPerMile,
       );
-      final limited = outcome.matches
+      var matches = outcome.matches;
+      if (placeQuery.openNow == true) {
+        final withHours = matches
+            .where((value) => value.place.openingHours != null)
+            .toList(growable: false);
+        if (withHours.isEmpty) {
+          return const LocalQueryResult(
+            status: QueryResultStatus.unavailable,
+            detail:
+                'The matching place data does not include reliable opening hours, so I cannot verify what is open now.',
+          );
+        }
+        matches = withHours
+            .where(
+              (value) => value.place.openingHours!.isOpenAt(DateTime.now()),
+            )
+            .toList(growable: false);
+      }
+      final limited = matches
           .take(plan.limit)
           .map((value) => value.place)
           .toList(growable: false);
@@ -67,8 +78,8 @@ class FindPoiCapability implements QueryCapability {
         places: limited,
         selectedPoi: plan.limit == 1 ? limited.first : null,
         candidatesRetrieved: outcome.retrievedCount,
-        candidatesMatched: outcome.matches.length,
-        selectedMatchScore: outcome.matches.first.score,
+        candidatesMatched: matches.length,
+        selectedMatchScore: matches.first.score,
       );
     }
     if (points.isEmpty) {

@@ -70,6 +70,27 @@ class MainActivity : FlutterActivity() {
                 result.success(true)
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "charon/place_actions").setMethodCallHandler { call, result ->
+            val value = call.argument<String>("value")
+            if (value == null) {
+                result.success(false)
+                return@setMethodCallHandler
+            }
+            val uri = when (call.method) {
+                "call" -> Uri.parse("tel:${value.filter { it.isDigit() || it == '+' }}")
+                "openWebsite" -> Uri.parse(value)
+                else -> {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+            if (intent.resolveActivity(packageManager) == null) result.success(false)
+            else {
+                startActivity(intent)
+                result.success(true)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

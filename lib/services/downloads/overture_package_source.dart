@@ -7,6 +7,7 @@ import 'package:vector_tile/vector_tile.dart';
 
 import '../../core/models/geo.dart';
 import '../../core/models/poi.dart';
+import '../../core/models/opening_hours.dart';
 import '../../core/models/region.dart';
 
 class OverturePackageDownload {
@@ -92,6 +93,9 @@ class OverturePackageSource {
                   category: _appCategory(primary),
                   subcategory: primary,
                   address: _address(properties),
+                  phoneNumber: _firstContact(properties, 'phones'),
+                  website: _website(properties),
+                  openingHours: _openingHours(properties),
                 ),
               );
             }
@@ -165,6 +169,87 @@ class OverturePackageSource {
     } catch (_) {
       return '';
     }
+  }
+
+  String? _firstContact(Map<String, VectorTileValue> values, String key) {
+    final raw = _string(values, key);
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List && decoded.isNotEmpty) {
+        final first = decoded.first;
+        if (first is String) return first.trim();
+        if (first is Map) {
+          final value = first['value'] ?? first['phone'] ?? first['url'];
+          if (value is String && value.trim().isNotEmpty) return value.trim();
+        }
+      }
+    } catch (_) {
+      return raw.trim();
+    }
+    return null;
+  }
+
+  Uri? _website(Map<String, VectorTileValue> values) {
+    final value = _firstContact(values, 'websites');
+    if (value == null) return null;
+    final normalized = value.contains('://') ? value : 'https://$value';
+    final uri = Uri.tryParse(normalized);
+    return uri?.hasAuthority == true ? uri : null;
+  }
+
+  PlaceOpeningHours? _openingHours(Map<String, VectorTileValue> values) {
+    final raw =
+        _string(values, 'opening_hours') ?? _string(values, 'operating_hours');
+    if (raw == null || raw.trim().isEmpty) return null;
+    final schedule = <int, List<OpeningInterval>>{};
+    final dayNumbers = <String, int>{
+      'Mo': 1,
+      'Tu': 2,
+      'We': 3,
+      'Th': 4,
+      'Fr': 5,
+      'Sa': 6,
+      'Su': 7,
+    };
+    final value = raw.trim();
+    if (value == '24/7') {
+      return PlaceOpeningHours({
+        for (var day = 1; day <= 7; day++)
+          day: const [OpeningInterval(0, 1440)],
+      });
+    }
+    for (final rule in value.split(';')) {
+      final match = RegExp(
+        r'^\s*([A-Z][a-z](?:-[A-Z][a-z])?(?:,[A-Z][a-z])*)\s+(\d\d):(\d\d)-(\d\d):(\d\d)\s*$',
+      ).firstMatch(rule);
+      if (match == null) continue;
+      final days = <int>[];
+      for (final part in match.group(1)!.split(',')) {
+        if (part.contains('-')) {
+          final range = part.split('-');
+          final start = dayNumbers[range[0]];
+          final end = dayNumbers[range[1]];
+          if (start == null || end == null) continue;
+          var day = start;
+          while (true) {
+            days.add(day);
+            if (day == end) break;
+            day = day == 7 ? 1 : day + 1;
+          }
+        } else if (dayNumbers[part] case final int day) {
+          days.add(day);
+        }
+      }
+      final opens =
+          int.parse(match.group(2)!) * 60 + int.parse(match.group(3)!);
+      final closes =
+          int.parse(match.group(4)!) * 60 + int.parse(match.group(5)!);
+      for (final day in days) {
+        (schedule[day] ??= []).add(OpeningInterval(opens, closes));
+      }
+    }
+    return schedule.isEmpty ? null : PlaceOpeningHours(schedule);
   }
 
   String _appCategory(String value) {

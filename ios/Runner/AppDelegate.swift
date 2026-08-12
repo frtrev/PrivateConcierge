@@ -8,6 +8,7 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var speechHandler: IosOnDeviceSpeechHandler?
   private var navigationChannel: FlutterMethodChannel?
+  private var placeActionsChannel: FlutterMethodChannel?
   private var visitMonitoringHandler: IosVisitMonitoringHandler?
   private var carChannel: FlutterMethodChannel?
   private var pendingTalkRequest = false
@@ -94,6 +95,30 @@ import UIKit
         return
       }
       UIApplication.shared.open(url, options: [:]) { opened in result(opened) }
+    }
+    placeActionsChannel = FlutterMethodChannel(
+      name: "charon/place_actions",
+      binaryMessenger: registrar.messenger()
+    )
+    placeActionsChannel?.setMethodCallHandler { call, result in
+      guard let arguments = call.arguments as? [String: Any],
+        let value = arguments["value"] as? String
+      else {
+        result(false)
+        return
+      }
+      let url: URL?
+      if call.method == "call" {
+        let digits = value.filter { $0.isNumber || $0 == "+" }
+        url = URL(string: "tel:\(digits)")
+      } else if call.method == "openWebsite" {
+        url = URL(string: value)
+      } else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let url else { result(false); return }
+      UIApplication.shared.open(url, options: [:]) { result($0) }
     }
   }
 

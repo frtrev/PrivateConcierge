@@ -132,7 +132,13 @@ data class CarPlaceResult(
     val name: String,
     val latitude: Double,
     val longitude: Double,
-    val detail: String
+    val detail: String,
+    val address: String,
+    val category: String,
+    val distanceMeters: Double?,
+    val phoneNumber: String?,
+    val website: String?,
+    val isOpenNow: Boolean?
 ) {
     companion object {
         fun from(payload: Map<String, Any?>): CarPlaceResult? {
@@ -141,9 +147,14 @@ data class CarPlaceResult(
             val longitude = (payload["longitude"] as? Number)?.toDouble() ?: return null
             val address = payload["address"] as? String ?: ""
             val meters = (payload["distanceMeters"] as? Number)?.toDouble()
+            val category = payload["category"] as? String ?: ""
+            val phone = payload["phoneNumber"] as? String
+            val website = payload["website"] as? String
+            val isOpenNow = payload["isOpenNow"] as? Boolean
             val miles = meters?.let { "%.1f miles".format(it / 1609.344) }
-            val detail = listOfNotNull(miles, address.takeIf(String::isNotBlank)).joinToString(" · ")
-            return CarPlaceResult(name, latitude, longitude, detail)
+            val status = isOpenNow?.let { if (it) "Open now" else "Closed" }
+            val detail = listOfNotNull(status, miles, address.takeIf(String::isNotBlank)).joinToString(" · ")
+            return CarPlaceResult(name, latitude, longitude, detail, address, category, meters, phone, website, isOpenNow)
         }
     }
 }

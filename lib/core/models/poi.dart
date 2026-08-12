@@ -1,4 +1,5 @@
 import 'geo.dart';
+import 'opening_hours.dart';
 
 class PointOfInterest {
   const PointOfInterest({
@@ -11,6 +12,9 @@ class PointOfInterest {
     required this.address,
     this.description,
     this.distanceMeters,
+    this.phoneNumber,
+    this.website,
+    this.openingHours,
   });
   final String id;
   final String regionId;
@@ -21,6 +25,9 @@ class PointOfInterest {
   final String address;
   final String? description;
   final double? distanceMeters;
+  final String? phoneNumber;
+  final Uri? website;
+  final PlaceOpeningHours? openingHours;
 
   PointOfInterest withDistance(double value) => PointOfInterest(
     id: id,
@@ -32,5 +39,8 @@ class PointOfInterest {
     address: address,
     description: description,
     distanceMeters: value,
+    phoneNumber: phoneNumber,
+    website: website,
+    openingHours: openingHours,
   );
 }

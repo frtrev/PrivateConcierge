@@ -1,10 +1,12 @@
 import 'dart:math' as math;
+import 'dart:convert';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import '../core/models/geo.dart';
 import '../core/models/poi.dart';
+import '../core/models/opening_hours.dart';
 import '../repositories/poi_repository.dart';
 
 class SqlitePoiRepository implements PoiRepository {
@@ -14,15 +16,20 @@ class SqlitePoiRepository implements PoiRepository {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'public_geography.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, _) async {
         await db.execute(
-          'CREATE TABLE poi (id TEXT PRIMARY KEY, region_id TEXT NOT NULL, name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT NOT NULL, subcategory TEXT NOT NULL, address TEXT NOT NULL, description TEXT)',
+          'CREATE TABLE poi (id TEXT PRIMARY KEY, region_id TEXT NOT NULL, name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT NOT NULL, subcategory TEXT NOT NULL, address TEXT NOT NULL, description TEXT, phone_number TEXT, website TEXT, opening_hours TEXT)',
         );
         await _createIndexes(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createIndexes(db);
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE poi ADD COLUMN phone_number TEXT');
+          await db.execute('ALTER TABLE poi ADD COLUMN website TEXT');
+          await db.execute('ALTER TABLE poi ADD COLUMN opening_hours TEXT');
+        }
       },
     );
   }
@@ -46,6 +53,11 @@ class SqlitePoiRepository implements PoiRepository {
             'subcategory': point.subcategory,
             'address': point.address,
             'description': point.description,
+            'phone_number': point.phoneNumber,
+            'website': point.website?.toString(),
+            'opening_hours': point.openingHours == null
+                ? null
+                : jsonEncode(point.openingHours!.toMap()),
           });
           pending++;
           if (pending == 1000) {
@@ -117,6 +129,16 @@ class SqlitePoiRepository implements PoiRepository {
                 subcategory: row['subcategory']! as String,
                 address: row['address']! as String,
                 description: row['description'] as String?,
+                phoneNumber: row['phone_number'] as String?,
+                website: (row['website'] as String?) == null
+                    ? null
+                    : Uri.tryParse(row['website']! as String),
+                openingHours: (row['opening_hours'] as String?) == null
+                    ? null
+                    : PlaceOpeningHours.fromMap(
+                        jsonDecode(row['opening_hours']! as String)
+                            as Map<String, dynamic>,
+                      ),
               );
               return point.withDistance(
                 distanceMeters(origin, point.coordinates),

@@ -1,9 +1,10 @@
 import 'geo.dart';
 import 'poi.dart';
+import 'opening_hours.dart';
 
 enum AssistantResultType { message, place, placeList, navigation, unavailable }
 
-enum AssistantActionType { openInMaps, navigate }
+enum AssistantActionType { openInMaps, navigate, call, openWebsite }
 
 class AssistantAction {
   const AssistantAction({required this.type, required this.placeId});
@@ -25,6 +26,9 @@ class PlaceResult {
     this.subcategory,
     this.distanceMeters,
     this.phoneNumber,
+    this.website,
+    this.openingHours,
+    this.isOpenNow,
   });
 
   factory PlaceResult.fromPoi(PointOfInterest poi) => PlaceResult(
@@ -36,6 +40,10 @@ class PlaceResult {
     category: poi.category,
     subcategory: poi.subcategory,
     distanceMeters: poi.distanceMeters,
+    phoneNumber: poi.phoneNumber,
+    website: poi.website?.toString(),
+    openingHours: poi.openingHours,
+    isOpenNow: poi.openingHours?.isOpenAt(DateTime.now()),
   );
 
   final String id;
@@ -47,6 +55,9 @@ class PlaceResult {
   final String? subcategory;
   final double? distanceMeters;
   final String? phoneNumber;
+  final String? website;
+  final PlaceOpeningHours? openingHours;
+  final bool? isOpenNow;
 
   Map<String, Object?> toMap() => {
     'id': id,
@@ -58,6 +69,9 @@ class PlaceResult {
     'subcategory': subcategory,
     'distanceMeters': distanceMeters,
     'phoneNumber': phoneNumber,
+    'website': website,
+    'openingHours': openingHours?.toMap(),
+    'isOpenNow': isOpenNow,
   };
 
   PointOfInterest toPoi() => PointOfInterest(
@@ -69,6 +83,9 @@ class PlaceResult {
     subcategory: subcategory ?? '',
     address: address,
     distanceMeters: distanceMeters,
+    phoneNumber: phoneNumber,
+    website: website == null ? null : Uri.tryParse(website!),
+    openingHours: openingHours,
   );
 }
 

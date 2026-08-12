@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../core/models/assistant_command.dart';
 import '../../core/models/assistant_result.dart';
 import '../../core/models/local_query.dart';
@@ -8,16 +10,18 @@ import '../../services/downloads/region_package_manager.dart';
 import '../../services/nearby/nearby_service.dart';
 import '../../services/profile/user_profile_service.dart';
 import '../../services/query/local_query_engine.dart';
+import '../../services/query/place_detail_follow_up.dart';
 
 class AssistantEngine {
-  const AssistantEngine({
+  AssistantEngine({
     required this.queries,
     required this.commands,
     required this.bootstrap,
     required this.packages,
     required this.nearby,
     required this.profiles,
-  });
+    PlaceDetailFollowUpResolver? placeDetails,
+  }) : placeDetails = placeDetails ?? PlaceDetailFollowUpResolver();
 
   final LocalQueryEngine queries;
   final CommandInterpreter commands;
@@ -25,13 +29,58 @@ class AssistantEngine {
   final RegionPackageManager packages;
   final NearbyService nearby;
   final UserProfileService profiles;
+  final PlaceDetailFollowUpResolver placeDetails;
 
   Future<AssistantResult> answer(String text) async {
+    final detailAnswer = _placeDetailFollowUp(text);
+    if (detailAnswer != null) return detailAnswer;
     final answer = await queries.answer(text, origin: bootstrap.coordinates);
     if (answer.plan.intent != LocalQueryIntent.unknown) {
       return _fromQuery(answer);
     }
     return _fromCommand(text);
+  }
+
+  AssistantResult? _placeDetailFollowUp(String text) {
+    if (!placeDetails.recognizes(text)) return null;
+    final place = queries.context.current?.selectedPoi;
+    if (place != null && kDebugMode) _logPlaceDetails(place);
+    final answer = placeDetails.resolve(text, place);
+    return _detailResult(answer.message, place, action: answer.action);
+  }
+
+  AssistantResult _detailResult(
+    String message,
+    PointOfInterest? place, {
+    AssistantActionType? action,
+  }) => AssistantResult(
+    response: _personalize(message),
+    spokenResponse: message,
+    type: place == null
+        ? AssistantResultType.message
+        : AssistantResultType.place,
+    places: place == null ? const [] : [PlaceResult.fromPoi(place)],
+    actions: action == null || place == null
+        ? const []
+        : [AssistantAction(type: action, placeId: place.id)],
+    context: AssistantConversationState(
+      lastIntent: 'placeDetails',
+      selectedPlaceId: place?.id,
+    ),
+  );
+
+  void _logPlaceDetails(PointOfInterest place) {
+    debugPrint('''
+Place details provider: Overture
+place=${place.name}
+openingHours=${place.openingHours == null ? 'unavailable' : 'provider'}
+phoneNumber=${place.phoneNumber == null ? 'unavailable' : 'provider'}
+website=${place.website == null ? 'unavailable' : 'provider'}
+address=${place.address.isEmpty ? 'unavailable' : 'provider'}
+coordinates=provider
+category=provider
+distance=${place.distanceMeters == null ? 'unavailable' : 'calculated locally'}
+''');
   }
 
   AssistantResult _fromQuery(QueryAnswer answer) {
@@ -42,6 +91,11 @@ class AssistantEngine {
         : selected == null
         ? const <PointOfInterest>[]
         : [selected];
+    if (kDebugMode) {
+      for (final poi in pois) {
+        _logPlaceDetails(poi);
+      }
+    }
     final places = pois.map(PlaceResult.fromPoi).toList(growable: false);
     final actions = selected == null
         ? const <AssistantAction>[]
@@ -54,6 +108,16 @@ class AssistantEngine {
               type: AssistantActionType.navigate,
               placeId: selected.id,
             ),
+            if (selected.phoneNumber?.isNotEmpty == true)
+              AssistantAction(
+                type: AssistantActionType.call,
+                placeId: selected.id,
+              ),
+            if (selected.website != null)
+              AssistantAction(
+                type: AssistantActionType.openWebsite,
+                placeId: selected.id,
+              ),
           ];
     final personalized = _personalize(answer.text);
     final type = result.navigationRequested

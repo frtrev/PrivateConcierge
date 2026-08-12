@@ -184,6 +184,16 @@ final class CarPlaySessionCoordinator {
       self?.speechSynthesizer.speak(AVSpeechUtterance(string: response))
     }
     let places = payload["places"] as? [[String: Any]] ?? []
+    let actions = payload["actions"] as? [[String: Any]] ?? []
+    if let place = places.first,
+      actions.contains(where: { $0["type"] as? String == "call" }),
+      let phone = place["phoneNumber"] as? String
+    {
+      let digits = phone.filter { $0.isNumber || $0 == "+" }
+      if let url = URL(string: "tel:\(digits)") {
+        UIApplication.shared.open(url)
+      }
+    }
     if payload["type"] as? String == "navigation", let place = places.first {
       navigate(to: place)
     }
@@ -240,9 +250,30 @@ final class CarPlaySessionCoordinator {
       self?.navigate(to: place)
       completion()
     }
+    var detailItems = [detail, navigate]
+    if let phone = place["phoneNumber"] as? String, !phone.isEmpty {
+      let call = CPListItem(text: "Call", detailText: phone)
+      call.handler = { _, completion in
+        let digits = phone.filter { $0.isNumber || $0 == "+" }
+        if let url = URL(string: "tel:\(digits)") {
+          UIApplication.shared.open(url)
+        }
+        completion()
+      }
+      detailItems.append(call)
+    }
+    if place["website"] as? String != nil {
+      let website = CPListItem(
+        text: "Website available",
+        detailText: "Open it from Charon on your phone"
+      )
+      if #available(iOS 15.0, *) { website.isEnabled = false }
+      else { website.handler = { _, completion in completion() } }
+      detailItems.append(website)
+    }
     let template = CPListTemplate(
       title: name,
-      sections: [CPListSection(items: [detail, navigate])]
+      sections: [CPListSection(items: detailItems)]
     )
     template.backButton = CPBarButton(type: .text) { [weak interfaceController] _ in
       interfaceController?.popTemplate(animated: true, completion: nil)
