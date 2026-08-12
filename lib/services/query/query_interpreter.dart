@@ -96,7 +96,9 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
     ).firstMatch(normalized);
     final brand = vocabulary.findBrand(normalized);
     final categoryMatch = vocabulary.findCategory(normalized);
-    final category = categoryMatch?.value ?? brand?.category;
+    final typeSearch = vocabulary.findTypeSearchTerm(normalized);
+    var category = categoryMatch?.value ?? brand?.category;
+    if (typeSearch?.value == 'donut') category = null;
     final cuisines = PlaceVocabulary.cuisines.where(
       (value) => PlaceVocabulary.containsPhrase(normalized, value),
     );
@@ -110,10 +112,19 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
     final hasPlaceAction = RegExp(
       r'\b(show|find|where|are there|what)\b',
     ).hasMatch(normalized);
-    final genericTerm = category == null && brand == null && hasPlaceAction
+    final possibleNamedTerm = brand == null && hasPlaceAction
         ? _genericSearchTerm(normalized)
         : null;
-    final searchTerm = cuisine ?? genericTerm;
+    final isProbableBusinessName =
+        possibleNamedTerm != null &&
+        possibleNamedTerm.split(' ').length >= 3 &&
+        !PlaceVocabulary.typeSearchTerms.keys.any(
+          (value) => PlaceVocabulary.normalizeName(value) == possibleNamedTerm,
+        );
+    final genericTerm = category == null || isProbableBusinessName
+        ? possibleNamedTerm
+        : null;
+    final searchTerm = cuisine ?? typeSearch?.value ?? genericTerm;
 
     final looksLikePoiQuery =
         category != null ||

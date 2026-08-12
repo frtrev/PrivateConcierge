@@ -186,6 +186,61 @@ void main() {
     );
   });
 
+  test('finds Walmart, donuts, pizza, and Memphis Pizza Cafe', () async {
+    final engine = makeEngine(
+      points: const [
+        PointOfInterest(
+          id: 'walmart',
+          regionId: 'r',
+          name: 'Walmart Supercenter',
+          coordinates: Coordinates(35.01, -90),
+          category: 'grocery',
+          subcategory: 'supermarket',
+          address: '7525 Winchester Road',
+        ),
+        PointOfInterest(
+          id: 'donut',
+          regionId: 'r',
+          name: 'Gibson Donuts',
+          coordinates: Coordinates(35.02, -90),
+          category: 'other',
+          subcategory: 'donuts',
+          address: '760 Mount Moriah Road',
+        ),
+        PointOfInterest(
+          id: 'pizza',
+          regionId: 'r',
+          name: 'Aldo\'s Pizza Pies',
+          coordinates: Coordinates(35.03, -90),
+          category: 'restaurant',
+          subcategory: 'pizza_restaurant',
+          address: '100 South Main Street',
+        ),
+        PointOfInterest(
+          id: 'memphis-pizza-cafe',
+          regionId: 'r',
+          name: 'Memphis Pizza Cafe',
+          coordinates: Coordinates(35.04, -90),
+          category: 'restaurant',
+          subcategory: 'pizza_restaurant',
+          address: '2087 Madison Avenue',
+        ),
+      ],
+    );
+
+    final expectations = <String, String>{
+      'Where is the nearest Walmart?': 'walmart',
+      'Where is the nearest donut place?': 'donut',
+      'Where is the nearest pizza place?': 'pizza',
+      'Where is the nearest pizza restaurant?': 'pizza',
+      'Where is the nearest Memphis Pizza Cafe?': 'memphis-pizza-cafe',
+    };
+    for (final entry in expectations.entries) {
+      final answer = await engine.answer(entry.key, origin: origin);
+      expect(answer.result.selectedPoi?.id, entry.value, reason: entry.key);
+    }
+  });
+
   test('missing BP is explicit and labels Shell as an alternative', () async {
     final answer = await makeEngine(
       points: const [

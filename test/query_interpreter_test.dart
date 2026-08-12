@@ -84,6 +84,27 @@ void main() {
   });
 
   group('structured place queries', () {
+    test('parses retail, pizza, donut, and named-place requests', () {
+      final walmart = interpreter.interpret('Where is the nearest Walmart?');
+      expect(walmart.placeQuery?.brand, 'Walmart');
+      expect(walmart.operation, QueryOperation.nearest);
+
+      for (final phrase in ['pizza place', 'pizza restaurant']) {
+        final pizza = interpreter.interpret('Where is the nearest $phrase?');
+        expect(pizza.placeQuery?.category, 'restaurant', reason: phrase);
+        expect(pizza.placeQuery?.searchTerm, 'pizza', reason: phrase);
+      }
+
+      final donut = interpreter.interpret('Where is the nearest donut place?');
+      expect(donut.placeQuery?.category, isNull);
+      expect(donut.placeQuery?.searchTerm, 'donut');
+
+      final named = interpreter.interpret(
+        'Where is the nearest Memphis Pizza Cafe?',
+      );
+      expect(named.placeQuery?.searchTerm, 'memphis pizza cafe');
+    });
+
     test("parses closest BP", () {
       final result = interpreter.interpret("Where's the closest BP?");
       expect(result.intent, LocalQueryIntent.findPoi);

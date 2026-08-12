@@ -148,9 +148,11 @@ class SqlitePoiRepository implements PoiRepository {
               if (point.distanceMeters! > radiusMeters) return false;
               final normalized = query?.trim().toLowerCase() ?? '';
               if (normalized.isEmpty) return true;
-              return point.name.toLowerCase().contains(normalized) ||
-                  point.address.toLowerCase().contains(normalized) ||
-                  point.subcategory.toLowerCase().contains(normalized);
+              final searchText =
+                  '${point.name} ${point.address} '
+                          '${point.subcategory.replaceAll('_', ' ')}'
+                      .toLowerCase();
+              return searchText.contains(normalized);
             })
             .toList()
           ..sort((a, b) => a.distanceMeters!.compareTo(b.distanceMeters!));

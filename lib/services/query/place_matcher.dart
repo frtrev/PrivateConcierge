@@ -64,9 +64,15 @@ class PlaceMatcher {
   }
 
   double? score(PlaceQuery query, PointOfInterest place) {
-    if (query.category != null && place.category != query.category) return null;
+    if (query.brand == null &&
+        query.category != null &&
+        place.category != query.category) {
+      return null;
+    }
 
-    var score = query.category == null ? 0.0 : weights.category;
+    var score = query.category == null || place.category != query.category
+        ? 0.0
+        : weights.category;
     final normalizedName = PlaceVocabulary.normalizeName(place.name);
     if (query.brand != null) {
       final brand = PlaceVocabulary.brands.firstWhere(
@@ -87,7 +93,7 @@ class PlaceMatcher {
       final haystack = PlaceVocabulary.normalizeName(
         '${place.name} ${place.subcategory} ${place.description ?? ''}',
       );
-      if (!PlaceVocabulary.containsPhrase(haystack, term)) return null;
+      if (!PlaceVocabulary.matchesSearchTerm(haystack, term)) return null;
       score += weights.keyword;
     }
 

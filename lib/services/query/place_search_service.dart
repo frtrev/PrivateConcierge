@@ -25,12 +25,11 @@ class PlaceCandidateRetriever {
     PlaceQuery query, {
     required double radiusMeters,
   }) {
-    final repositoryQuery = query.category == null && query.brand == null
-        ? query.searchTerm
-        : null;
+    final repositoryCategory = query.brand == null ? query.category : null;
+    final repositoryQuery = query.brand == null ? query.searchTerm : null;
     return nearby.search(
       origin,
-      category: query.category,
+      category: repositoryCategory,
       query: repositoryQuery,
       radiusMeters: radiusMeters,
     );

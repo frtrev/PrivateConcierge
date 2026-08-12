@@ -50,6 +50,30 @@ class PlaceVocabulary {
     'school': 'education',
     'cafe': 'restaurant',
     'coffee shop': 'restaurant',
+    'pizza places': 'restaurant',
+    'pizza place': 'restaurant',
+    'pizza restaurants': 'restaurant',
+    'pizza restaurant': 'restaurant',
+  };
+
+  static const typeSearchTerms = <String, String>{
+    'pizza places': 'pizza',
+    'pizza place': 'pizza',
+    'pizza restaurants': 'pizza',
+    'pizza restaurant': 'pizza',
+    'donut places': 'donut',
+    'donut place': 'donut',
+    'doughnut places': 'donut',
+    'doughnut place': 'donut',
+    'donuts': 'donut',
+    'donut': 'donut',
+    'doughnuts': 'donut',
+    'doughnut': 'donut',
+  };
+
+  static const searchTermAliases = <String, Set<String>>{
+    'donut': {'donut', 'donuts', 'doughnut', 'doughnuts'},
+    'pizza': {'pizza'},
   };
 
   static const brands = <PlaceBrand>[
@@ -133,9 +157,19 @@ class PlaceVocabulary {
     return null;
   }
 
+  MapEntry<String, String>? findTypeSearchTerm(String normalizedText) {
+    final entries = typeSearchTerms.entries.toList()
+      ..sort((a, b) => b.key.length.compareTo(a.key.length));
+    for (final entry in entries) {
+      if (containsPhrase(normalizedText, entry.key)) return entry;
+    }
+    return null;
+  }
+
   static String normalize(String value) => value
       .toLowerCase()
       .replaceAll('&', ' and ')
+      .replaceAll(RegExp(r'[_-]+'), ' ')
       .replaceAll(RegExp(r"[^a-z0-9' ]"), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
@@ -149,5 +183,11 @@ class PlaceVocabulary {
     return RegExp(
       '(?:^|\\s)${RegExp.escape(normalizedPhrase)}(?:\\s|\$)',
     ).hasMatch(normalizedText);
+  }
+
+  static bool matchesSearchTerm(String text, String searchTerm) {
+    final normalizedTerm = normalizeName(searchTerm);
+    final aliases = searchTermAliases[normalizedTerm] ?? {normalizedTerm};
+    return aliases.any((alias) => containsPhrase(text, alias));
   }
 }

@@ -22,6 +22,24 @@ PointOfInterest place({
 );
 
 void main() {
+  test('Walmart brand can match provider grocery categorization', () {
+    const query = PlaceQuery(
+      category: 'shopping',
+      brand: 'Walmart',
+      limit: 1,
+      sort: PlaceSort.distance,
+    );
+    final result = const PlaceMatcher().match(query, [
+      place(
+        id: 'walmart',
+        name: 'Walmart Supercenter',
+        category: 'grocery',
+        distance: 1200,
+      ),
+    ]);
+    expect(result.matches.single.place.name, 'Walmart Supercenter');
+  });
+
   const matcher = PlaceMatcher();
 
   test('explicit BP rejects an unrelated closer location', () {
