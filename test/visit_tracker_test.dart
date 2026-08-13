@@ -42,6 +42,7 @@ class MemoryPrivateDataStore implements PrivateDataStore {
     required String name,
     required String tag,
     required Coordinates coordinates,
+    double radiusMeters = 100,
     bool overwrite = false,
   }) async {
     final place = PointOfInterest(
@@ -52,6 +53,7 @@ class MemoryPrivateDataStore implements PrivateDataStore {
       category: tag,
       subcategory: 'custom',
       address: '',
+      visitRadiusMeters: radiusMeters,
     );
     custom.add(place);
     return place;
@@ -68,7 +70,10 @@ class MemoryPrivateDataStore implements PrivateDataStore {
         (place) =>
             place.withDistance(distanceMeters(coordinates, place.coordinates)),
       )
-      .where((place) => place.distanceMeters! <= radiusMeters)
+      .where(
+        (place) =>
+            place.distanceMeters! <= (place.visitRadiusMeters ?? radiusMeters),
+      )
       .toList();
   @override
   Future<void> deleteCustomPlace(String id) async =>

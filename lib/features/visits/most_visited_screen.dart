@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/visited_place.dart';
 import '../../core/models/visit_diagnostic.dart';
+import '../../core/models/visit_session.dart';
 import '../../services/storage/private_data_store.dart';
 import '../../services/visits/visit_tracker.dart';
 
@@ -135,6 +136,15 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
                     Text(place.visitCount == 1 ? 'visit' : 'visits'),
                   ],
                 ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => _VisitHistoryScreen(
+                      place: place,
+                      privateData: widget.privateData,
+                    ),
+                  ),
+                ),
               );
             },
           );
@@ -189,13 +199,92 @@ class _TrackingDiagnosticsSheet extends StatefulWidget {
       _TrackingDiagnosticsSheetState();
 }
 
+class _VisitHistoryScreen extends StatelessWidget {
+  const _VisitHistoryScreen({required this.place, required this.privateData});
+
+  final VisitedPlace place;
+  final PrivateDataStore privateData;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: Text(place.name)),
+    body: FutureBuilder<List<VisitSession>>(
+      future: privateData.visitSessions(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return const Center(
+            child: Text('Visit sessions could not be loaded.'),
+          );
+        }
+        final sessions = (snapshot.data ?? const <VisitSession>[])
+            .where((session) => session.poiId == place.poiId)
+            .toList(growable: false);
+        if (sessions.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No completed arrival and departure sessions are available for this place yet.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: sessions.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final session = sessions[index];
+            final departure = session.departure!;
+            return ListTile(
+              leading: const Icon(Icons.history),
+              title: Text(_sessionDate(session.arrival)),
+              subtitle: Text(
+                'Arrived ${_sessionTime(session.arrival)}\n'
+                'Departed ${_sessionTime(departure)}',
+              ),
+              trailing: Text(
+                _sessionDuration(departure.difference(session.arrival)),
+              ),
+              isThreeLine: true,
+            );
+          },
+        );
+      },
+    ),
+  );
+
+  String _sessionDate(DateTime value) =>
+      '${value.month}/${value.day}/${value.year}';
+
+  String _sessionTime(DateTime value) {
+    final hour = value.hour == 0
+        ? 12
+        : value.hour > 12
+        ? value.hour - 12
+        : value.hour;
+    return '$hour:${value.minute.toString().padLeft(2, '0')} '
+        '${value.hour >= 12 ? 'PM' : 'AM'}';
+  }
+
+  String _sessionDuration(Duration value) {
+    final hours = value.inHours;
+    final minutes = value.inMinutes.remainder(60);
+    return hours == 0 ? '${minutes}m' : '${hours}h ${minutes}m';
+  }
+}
+
 class _TrackingDiagnosticsSheetState extends State<_TrackingDiagnosticsSheet> {
   late Future<List<VisitDiagnostic>> diagnostics;
 
   @override
   void initState() {
     super.initState();
-    diagnostics = widget.store.visitDiagnostics(limit: 200);
+    diagnostics = widget.store.visitDiagnostics();
   }
 
   @override
@@ -208,7 +297,7 @@ class _TrackingDiagnosticsSheetState extends State<_TrackingDiagnosticsSheet> {
             leading: const Icon(Icons.monitor_heart_outlined),
             title: const Text('Tracking diagnostics'),
             subtitle: const Text(
-              'Recent location delivery and visit decisions, stored only on this device and capped at 500 entries.',
+              'Location delivery and visit decisions from the last 24 hours, stored only on this device.',
             ),
             trailing: IconButton(
               tooltip: 'Clear diagnostics',
@@ -216,10 +305,7 @@ class _TrackingDiagnosticsSheetState extends State<_TrackingDiagnosticsSheet> {
               onPressed: () async {
                 await widget.store.clearVisitDiagnostics();
                 if (mounted) {
-                  setState(
-                    () =>
-                        diagnostics = widget.store.visitDiagnostics(limit: 200),
-                  );
+                  setState(() => diagnostics = widget.store.visitDiagnostics());
                 }
               },
             ),
@@ -269,7 +355,7 @@ class _TrackingDiagnosticsSheetState extends State<_TrackingDiagnosticsSheet> {
   );
 
   String _diagnosticTime(DateTime value) =>
-      '${value.month}/${value.day}\n${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+      '${value.month}/${value.day}\n${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}:${value.second.toString().padLeft(2, '0')}';
 }
 
 class _BackgroundTrackingCard extends StatelessWidget {

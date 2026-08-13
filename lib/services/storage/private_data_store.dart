@@ -11,7 +11,7 @@ import '../../core/models/visit_diagnostic.dart';
 
 abstract interface class VisitDiagnosticStore {
   Future<void> recordVisitDiagnostic(String event, String detail, DateTime at);
-  Future<List<VisitDiagnostic>> visitDiagnostics({int limit = 100});
+  Future<List<VisitDiagnostic>> visitDiagnostics();
   Future<void> clearVisitDiagnostics();
 }
 
@@ -21,6 +21,7 @@ abstract interface class PrivateDataStore {
     required String name,
     required String tag,
     required Coordinates coordinates,
+    double radiusMeters = 100,
     bool overwrite = false,
   });
   Future<List<PointOfInterest>> customPlaces();
@@ -50,7 +51,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 7,
+      version: 8,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -70,6 +71,11 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
         if (oldVersion < 5) await _createUnknownStaysTable(db);
         if (oldVersion < 6) await _createVisitSessionsTable(db);
         if (oldVersion < 7) await _createVisitDiagnosticsTable(db);
+        if (oldVersion >= 3 && oldVersion < 8) {
+          await db.execute(
+            'ALTER TABLE custom_places ADD COLUMN radius_meters REAL NOT NULL DEFAULT 100',
+          );
+        }
       },
     );
   }
@@ -79,6 +85,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
     required String name,
     required String tag,
     required Coordinates coordinates,
+    double radiusMeters = 100,
     bool overwrite = false,
   }) async {
     final db = _database ?? (throw StateError('Private database is not open'));
@@ -106,6 +113,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
       subcategory: 'custom',
       address: '',
       description: 'Private custom place',
+      visitRadiusMeters: radiusMeters.clamp(25, 1000).toDouble(),
     );
     final values = {
       'id': place.id,
@@ -114,6 +122,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
       'tag': place.category,
       'latitude': coordinates.latitude,
       'longitude': coordinates.longitude,
+      'radius_meters': place.visitRadiusMeters,
       'created_ms': DateTime.now().millisecondsSinceEpoch,
     };
     if (existingRows.isEmpty) {
@@ -159,7 +168,11 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
             distanceMeters(coordinates, place.coordinates),
           ),
         )
-        .where((place) => place.distanceMeters! <= radiusMeters)
+        .where(
+          (place) =>
+              place.distanceMeters! <=
+              (place.visitRadiusMeters ?? radiusMeters),
+        )
         .toList()
       ..sort((a, b) => a.distanceMeters!.compareTo(b.distanceMeters!));
   }
@@ -285,20 +298,32 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
       'event': event,
       'detail': detail,
     });
+    final cutoff = at
+        .subtract(const Duration(hours: 24))
+        .millisecondsSinceEpoch;
     await db.delete(
       'visit_diagnostics',
-      where:
-          'id NOT IN (SELECT id FROM visit_diagnostics ORDER BY id DESC LIMIT 500)',
+      where: 'at_ms < ?',
+      whereArgs: [cutoff],
     );
   }
 
   @override
-  Future<List<VisitDiagnostic>> visitDiagnostics({int limit = 100}) async {
+  Future<List<VisitDiagnostic>> visitDiagnostics() async {
     final db = _database ?? (throw StateError('Private database is not open'));
+    final cutoff = DateTime.now()
+        .subtract(const Duration(hours: 24))
+        .millisecondsSinceEpoch;
+    await db.delete(
+      'visit_diagnostics',
+      where: 'at_ms < ?',
+      whereArgs: [cutoff],
+    );
     final rows = await db.query(
       'visit_diagnostics',
+      where: 'at_ms >= ?',
+      whereArgs: [cutoff],
       orderBy: 'id DESC',
-      limit: limit.clamp(1, 500),
     );
     return rows
         .map(
@@ -478,7 +503,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
   );
 
   static Future<void> _createCustomPlacesTable(Database db) => db.execute(
-    'CREATE TABLE custom_places (id TEXT PRIMARY KEY, place_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tag TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, created_ms INTEGER NOT NULL)',
+    'CREATE TABLE custom_places (id TEXT PRIMARY KEY, place_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, tag TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius_meters REAL NOT NULL DEFAULT 100, created_ms INTEGER NOT NULL)',
   );
 
   static Future<void> _createUnknownStaysTable(Database db) => db.execute(
@@ -540,6 +565,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
         subcategory: 'custom',
         address: '',
         description: 'Private custom place',
+        visitRadiusMeters: (row['radius_meters'] as num?)?.toDouble() ?? 100,
       );
 }
 

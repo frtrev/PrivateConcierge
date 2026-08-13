@@ -15,6 +15,7 @@ class PointOfInterest {
     this.phoneNumber,
     this.website,
     this.openingHours,
+    this.visitRadiusMeters,
   });
   final String id;
   final String regionId;
@@ -28,6 +29,7 @@ class PointOfInterest {
   final String? phoneNumber;
   final Uri? website;
   final PlaceOpeningHours? openingHours;
+  final double? visitRadiusMeters;
 
   PointOfInterest withDistance(double value) => PointOfInterest(
     id: id,
@@ -42,5 +44,6 @@ class PointOfInterest {
     phoneNumber: phoneNumber,
     website: website,
     openingHours: openingHours,
+    visitRadiusMeters: visitRadiusMeters,
   );
 }

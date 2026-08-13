@@ -43,15 +43,15 @@
   or display cap. Repeated stays at the same POI update that row and increment its
   count only when at least four hours have elapsed; they do not create duplicate
   rows.
-- Completed visit sessions are retained without an automatic limit but do not yet
-  have a dedicated chronological history screen.
-- Tracking diagnostics intentionally retain only the newest 500 events and the UI
-  currently loads the newest 200. Add pagination or an explicit “load more” flow,
-  and label both limits in the interface.
-- Consider configurable diagnostic retention by age or count, separate from visit
-  history retention.
-- Add a chronological visit-session screen so parking arrivals/departures can be
-  audited without relying on low-level diagnostic events.
+- Completed visit sessions are currently retained without an automatic limit and
+  do not yet have a dedicated chronological history screen. Measure or estimate
+  the SQLite bytes consumed per session and expected visit frequency, then adopt
+  a time-based retention window sized to keep long-term storage reasonable. Prune
+  only completed sessions older than the window; never prune an active session,
+  and document how aggregate first/latest visit dates and counts behave when their
+  underlying sessions expire.
+- Consider making the rolling 24-hour diagnostic retention window configurable,
+  separate from visit-history retention.
 - Ensure privacy deletion controls clearly state whether they remove aggregate
   visits, sessions, diagnostics, or all three. The current “Delete location
   history” action removes aggregate visited places only.

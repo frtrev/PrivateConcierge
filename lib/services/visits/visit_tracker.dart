@@ -203,8 +203,8 @@ class VisitTracker {
       if (locationChanged) {
         await _diagnostic(
           'ambiguous_poi',
-          '${nearby[0].name} ${nearby[0].distanceMeters!.round()}m; '
-              '${nearby[1].name} ${nearby[1].distanceMeters!.round()}m',
+          '${nearby[0].name} ${_feet(nearby[0].distanceMeters!)}; '
+              '${nearby[1].name} ${_feet(nearby[1].distanceMeters!)}',
         );
       }
       await _recordUnknownObservation(coordinates, at);
@@ -227,7 +227,7 @@ class VisitTracker {
       _recordedCandidate = false;
       await _diagnostic(
         'candidate_started',
-        '${candidate.name} ${candidate.distanceMeters!.round()}m away',
+        '${candidate.name} ${_feet(candidate.distanceMeters!)} away',
       );
       return;
     }
@@ -278,7 +278,7 @@ class VisitTracker {
       await _diagnostic(
         nearby.isEmpty ? 'native_visit_unknown' : 'native_visit_ambiguous',
         nearby.isEmpty
-            ? 'No POI within 150m'
+            ? 'No POI within ${_feet(150)}'
             : '${nearby[0].name}; ${nearby[1].name}',
         at: visit.departure,
       );
@@ -293,7 +293,7 @@ class VisitTracker {
     await _privateDataStore.endVisitSession(sessionId, visit.departure);
     await _diagnostic(
       'native_visit_recorded',
-      '${place.name}; ${duration.inMinutes}m; ${place.distanceMeters!.round()}m away',
+      '${place.name}; ${duration.inMinutes}m; ${_feet(place.distanceMeters!)} away',
       at: visit.departure,
     );
     await onObservation?.call(visit.departure);
@@ -367,6 +367,8 @@ class VisitTracker {
     _departureCandidateSince = null;
     _departureObservations = 0;
   }
+
+  String _feet(double meters) => '${(meters * 3.28084).round()} ft';
 
   void _resetCandidate() {
     _candidateId = null;

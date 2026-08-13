@@ -33,6 +33,7 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
     var placeName = 'Home';
     var fieldVersion = 0;
     var tag = 'home';
+    var radiusMeters = 100.0;
     var saving = false;
     String? error;
     await showDialog<void>(
@@ -91,6 +92,24 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                   border: OutlineInputBorder(),
                 ),
               ),
+              const SizedBox(height: 16),
+              Text(
+                'Detection radius: ${_feetLabel(radiusMeters)}',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              Slider(
+                value: radiusMeters,
+                min: 25,
+                max: 500,
+                divisions: 19,
+                label: _feetLabel(radiusMeters),
+                onChanged: saving
+                    ? null
+                    : (value) => setDialogState(() => radiusMeters = value),
+              ),
+              const Text(
+                'Use a smaller radius for a house or small business and a larger radius for a campus or large property.',
+              ),
               if (error != null) ...[
                 const SizedBox(height: 10),
                 Text(
@@ -125,6 +144,7 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                           name: name,
                           tag: tag,
                           coordinates: currentCoordinates,
+                          radiusMeters: radiusMeters,
                         );
                         if (!mounted || !dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
@@ -175,6 +195,7 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                           name: name,
                           tag: tag,
                           coordinates: currentCoordinates!,
+                          radiusMeters: radiusMeters,
                           overwrite: true,
                         );
                         if (!mounted || !dialogContext.mounted) return;
@@ -256,7 +277,7 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
               leading: Icon(_iconFor(place.category)),
               title: Text(place.name),
               subtitle: Text(
-                '${_tagLabel(place.category)} • Private custom POI',
+                '${_tagLabel(place.category)} • ${_feetLabel(place.visitRadiusMeters ?? 100)} radius • Private custom POI',
               ),
               trailing: IconButton(
                 tooltip: 'Delete ${place.name}',
@@ -266,12 +287,61 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
                   _refresh();
                 },
               ),
+              onTap: () => _editRadius(place),
             );
           },
         );
       },
     ),
   );
+
+  Future<void> _editRadius(PointOfInterest place) async {
+    var radius = place.visitRadiusMeters ?? 100;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('${place.name} detection radius'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_feetLabel(radius)),
+              Slider(
+                value: radius,
+                min: 25,
+                max: 500,
+                divisions: 19,
+                label: _feetLabel(radius),
+                onChanged: (value) => setDialogState(() => radius = value),
+              ),
+              const Text(
+                'Arrival and departure detection will use this radius around the saved coordinates.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved != true) return;
+    await widget.privateData.saveCustomPlace(
+      name: place.name,
+      tag: place.category,
+      coordinates: place.coordinates,
+      radiusMeters: radius,
+      overwrite: true,
+    );
+    _refresh();
+  }
 
   IconData _iconFor(String tag) => switch (tag) {
     'home' => Icons.home_outlined,
@@ -284,4 +354,6 @@ class _MyPlacesScreenState extends State<MyPlacesScreen> {
     'work' => 'Work',
     _ => 'Other',
   };
+
+  String _feetLabel(double meters) => '${(meters * 3.28084).round()} feet';
 }
