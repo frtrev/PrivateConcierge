@@ -7,9 +7,17 @@ import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
+import android.speech.tts.UtteranceProgressListener
+import android.util.Log
+import java.util.Locale
 import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,6 +31,11 @@ class MainActivity : FlutterActivity() {
     private var recognizer: SpeechRecognizer? = null
     private var carChannel: MethodChannel? = null
     private var pendingTalkRequest = false
+    private var previewTts: TextToSpeech? = null
+    private var defaultPreviewVoice: Voice? = null
+    private var previewTtsInitializing = false
+    private val pendingTtsActions = mutableListOf<(TextToSpeech?) -> Unit>()
+    private var pendingPhoneSpeechResult: MethodChannel.Result? = null
 
     override fun provideFlutterEngine(context: Context): FlutterEngine =
         CharonFlutterEngineHost.get(context)
@@ -36,11 +49,17 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         carChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "charon/car").also { channel ->
             channel.setMethodCallHandler { call, result ->
-                if (call.method == "consumeTalkRequest") {
-                    val pending = pendingTalkRequest
-                    pendingTalkRequest = false
-                    result.success(pending)
-                } else result.notImplemented()
+                when (call.method) {
+                    "consumeTalkRequest" -> {
+                        val pending = pendingTalkRequest
+                        pendingTalkRequest = false
+                        result.success(pending)
+                    }
+                    // Android Auto owns its templates and submits directly through
+                    // this engine. Phone-only status/result publication is optional.
+                    "publishStatus", "publishResult" -> result.success(true)
+                    else -> result.notImplemented()
+                }
             }
         }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
@@ -70,6 +89,111 @@ class MainActivity : FlutterActivity() {
                 result.success(true)
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "private_concierge/speech_voice").setMethodCallHandler { call, result ->
+            val preferences = getSharedPreferences("charon_speech", Context.MODE_PRIVATE)
+            when (call.method) {
+                "selectedVoice" -> result.success(preferences.getString("voice_id", null))
+                "selectedEngine" -> result.success(selectedEngineId(preferences))
+                "engines" -> withPreviewTts { tts ->
+                    if (tts == null) result.success(emptyList<Map<String, String>>())
+                    else result.success(
+                        tts.engines
+                            .sortedBy { it.label.lowercase(Locale.ROOT) }
+                            .map { mapOf("id" to it.name, "name" to it.label) }
+                    )
+                }
+                "selectEngine" -> {
+                    val engineId = call.argument<String>("engineId")
+                    if (engineId == null) result.success(false)
+                    else {
+                        preferences.edit().putString("engine_id", engineId).remove("voice_id").apply()
+                        resetPreviewTts()
+                        result.success(true)
+                    }
+                }
+                "select" -> {
+                    val voiceId = call.argument<String>("voiceId")
+                    if (voiceId == null) result.success(false)
+                    else {
+                        preferences.edit()
+                            .putString("engine_id", selectedEngineId(preferences))
+                            .putString("voice_id", voiceId)
+                            .apply()
+                        result.success(true)
+                    }
+                }
+                "voices", "preview", "speak" -> withPreviewTts { tts ->
+                    if (tts == null) {
+                        result.error("tts_unavailable", "Text to speech is unavailable.", null)
+                    } else {
+                        if (call.method == "voices") {
+                            val namedVoices = tts.voices.orEmpty()
+                                .filter { isEnglish(it.locale) }
+                                .sortedBy { it.name.lowercase(Locale.ROOT) }
+                                .map { mapOf("id" to it.name, "name" to it.name, "locale" to it.locale.toLanguageTag()) }
+                            val localeVoices = tts.availableLanguages.orEmpty()
+                                .filter(::isEnglish)
+                                .sortedBy { it.displayName.lowercase(Locale.ROOT) }
+                                .map { locale ->
+                                    mapOf(
+                                        "id" to "locale:${locale.toLanguageTag()}",
+                                        "name" to locale.getDisplayName(locale),
+                                        "locale" to locale.toLanguageTag()
+                                    )
+                                }
+                            val exposed = if (namedVoices.isNotEmpty()) namedVoices else localeVoices
+                            result.success(
+                                listOf(
+                                    mapOf(
+                                        "id" to "system:default",
+                                        "name" to "System default",
+                                        "locale" to "Android TTS settings"
+                                    )
+                                ) + exposed
+                            )
+                        } else {
+                            val voiceId = if (call.method == "speak") {
+                                preferences.getString("voice_id", null) ?: "system:default"
+                            } else call.argument<String>("voiceId")
+                            val text = call.argument<String>("text") ?: "Hello."
+                            if (voiceId == "system:default") {
+                                defaultPreviewVoice?.let { tts.voice = it }
+                            } else if (voiceId?.startsWith("locale:") == true) {
+                                tts.setLanguage(Locale.forLanguageTag(voiceId.removePrefix("locale:")))
+                            } else {
+                                tts.voice = tts.voices?.firstOrNull { it.name == voiceId }
+                            }
+                            val utteranceId = if (call.method == "speak") "charon-phone-response" else "charon-preview"
+                            if (call.method == "speak") {
+                                pendingPhoneSpeechResult?.success(false)
+                                pendingPhoneSpeechResult = result
+                            }
+                            val status = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                            if (status == TextToSpeech.ERROR) {
+                                if (call.method == "speak") {
+                                    pendingPhoneSpeechResult = null
+                                    result.error("tts_failed", "Text to speech could not start.", null)
+                                } else result.success(false)
+                            } else if (call.method != "speak") {
+                                result.success(true)
+                            }
+                        }
+                    }
+                }
+                "installVoices" -> {
+                    val engineId = preferences.getString("engine_id", null)
+                    val intent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+                        if (engineId != null) setPackage(engineId)
+                    }
+                    if (intent.resolveActivity(packageManager) == null) result.success(false)
+                    else {
+                        startActivity(intent)
+                        result.success(true)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "charon/place_actions").setMethodCallHandler { call, result ->
             val value = call.argument<String>("value")
             if (value == null) {
@@ -93,6 +217,85 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun withPreviewTts(action: (TextToSpeech?) -> Unit) {
+        previewTts?.let {
+            action(it)
+            return
+        }
+        pendingTtsActions.add(action)
+        if (previewTtsInitializing) return
+        previewTtsInitializing = true
+        var created: TextToSpeech? = null
+        val preferences = getSharedPreferences("charon_speech", Context.MODE_PRIVATE)
+        val engineId = selectedEngineId(preferences)
+        created = TextToSpeech(this, { status ->
+            Handler(Looper.getMainLooper()).post {
+                previewTtsInitializing = false
+                val ready = if (status == TextToSpeech.SUCCESS) created else null
+                if (ready != null) {
+                    defaultPreviewVoice = ready.voice
+                    ready.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) = Unit
+
+                        override fun onDone(utteranceId: String?) {
+                            if (utteranceId != "charon-phone-response") return
+                            Handler(Looper.getMainLooper()).post {
+                                pendingPhoneSpeechResult?.success(true)
+                                pendingPhoneSpeechResult = null
+                            }
+                        }
+
+                        @Deprecated("Deprecated in Java")
+                        override fun onError(utteranceId: String?) {
+                            finishPhoneSpeechWithError(utteranceId)
+                        }
+
+                        override fun onError(utteranceId: String?, errorCode: Int) {
+                            finishPhoneSpeechWithError(utteranceId)
+                        }
+                    })
+                    previewTts = ready
+                }
+                val actions = pendingTtsActions.toList()
+                pendingTtsActions.clear()
+                actions.forEach { it(ready) }
+            }
+        }, engineId)
+    }
+
+    private fun finishPhoneSpeechWithError(utteranceId: String?) {
+        if (utteranceId != "charon-phone-response") return
+        Handler(Looper.getMainLooper()).post {
+            pendingPhoneSpeechResult?.error("tts_failed", "Text to speech did not finish.", null)
+            pendingPhoneSpeechResult = null
+        }
+    }
+
+    private fun resetPreviewTts() {
+        previewTts?.stop()
+        previewTts?.shutdown()
+        previewTts = null
+        defaultPreviewVoice = null
+        previewTtsInitializing = false
+        pendingTtsActions.clear()
+    }
+
+    private fun selectedEngineId(preferences: android.content.SharedPreferences): String? {
+        preferences.getString("engine_id", null)?.let { return it }
+        return if (isPackageInstalled(GOOGLE_TTS_PACKAGE)) GOOGLE_TTS_PACKAGE else null
+    }
+
+    private fun isPackageInstalled(packageName: String): Boolean = try {
+        packageManager.getPackageInfo(packageName, 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    private fun isEnglish(locale: Locale): Boolean =
+        locale.language.equals(Locale.ENGLISH.language, ignoreCase = true) ||
+            runCatching { locale.isO3Language.equals("eng", ignoreCase = true) }.getOrDefault(false)
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -102,17 +305,35 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun isOnDeviceRecognitionAvailable(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+    override fun onResume() {
+        super.onResume()
+        val result = pendingResult ?: return
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            pendingResult = null
+            Log.d(TAG, "Resuming pending recognition after permission grant")
+            startOnDeviceRecognition(result)
+        }
+    }
+
+    private fun isOnDeviceRecognitionAvailable(): Boolean {
+        val services = packageManager.queryIntentServices(
+            Intent(RecognitionService.SERVICE_INTERFACE),
+            PackageManager.MATCH_DEFAULT_ONLY
+        )
+        val available = services.isNotEmpty() || SpeechRecognizer.isRecognitionAvailable(this)
+        Log.d(TAG, "Speech recognition available=$available services=${services.size}")
+        return available
+    }
 
     private fun startOnDeviceRecognition(result: MethodChannel.Result) {
-        if (!isOnDeviceRecognitionAvailable()) {
-            result.error("unsupported", "On-device voice recognition is unavailable on this device.", null)
-            return
-        }
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Requesting RECORD_AUDIO permission")
             pendingResult = result
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), speechRequest)
+            return
+        }
+        if (!isOnDeviceRecognitionAvailable()) {
+            result.error("unsupported", "Voice recognition is unavailable on this device.", null)
             return
         }
         pendingResult = result
@@ -122,18 +343,33 @@ class MainActivity : FlutterActivity() {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         }
         recognizer?.destroy()
-        recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this).also { speech ->
+        val onDeviceAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        Log.d(TAG, "Starting recognition onDevice=$onDeviceAvailable")
+        recognizer = if (onDeviceAvailable) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        } else {
+            SpeechRecognizer.createSpeechRecognizer(this)
+        }.also { speech ->
             speech.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) = Unit
-                override fun onBeginningOfSpeech() = Unit
+                override fun onReadyForSpeech(params: Bundle?) {
+                    Log.d(TAG, "Recognizer ready for speech")
+                }
+                override fun onBeginningOfSpeech() {
+                    Log.d(TAG, "Recognizer detected speech")
+                }
                 override fun onRmsChanged(rmsdB: Float) = Unit
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
                 override fun onEndOfSpeech() = Unit
                 override fun onPartialResults(partialResults: Bundle?) = Unit
                 override fun onEvent(eventType: Int, params: Bundle?) = Unit
-                override fun onError(error: Int) = finishSpeechError("On-device recognition failed (code $error).")
+                override fun onError(error: Int) {
+                    Log.e(TAG, "Recognition failed code=$error")
+                    finishSpeechError("Voice recognition failed (code $error).")
+                }
                 override fun onResults(results: Bundle?) {
                     val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    Log.d(TAG, "Recognition completed hasText=${!text.isNullOrBlank()}")
                     pendingResult?.success(text)
                     pendingResult = null
                     recognizer?.destroy()
@@ -149,7 +385,10 @@ class MainActivity : FlutterActivity() {
         if (requestCode == speechRequest) {
             val result = pendingResult ?: return
             pendingResult = null
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startOnDeviceRecognition(result)
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "RECORD_AUDIO permission granted")
+                startOnDeviceRecognition(result)
+            }
             else result.error("permission_denied", "Microphone permission was denied.", null)
         }
     }
@@ -160,11 +399,21 @@ class MainActivity : FlutterActivity() {
         result.error("recognition_failed", message, null)
         recognizer?.destroy()
         recognizer = null
+        previewTts?.shutdown()
+        previewTts = null
     }
 
     override fun onDestroy() {
         recognizer?.destroy()
         recognizer = null
+        previewTts?.stop()
+        previewTts?.shutdown()
+        previewTts = null
         super.onDestroy()
+    }
+
+    companion object {
+        private const val TAG = "PrivateConciergeVoice"
+        private const val GOOGLE_TTS_PACKAGE = "com.google.android.tts"
     }
 }

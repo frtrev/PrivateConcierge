@@ -5,12 +5,18 @@ import Speech
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
+  AVSpeechSynthesizerDelegate
+{
   private var speechHandler: IosOnDeviceSpeechHandler?
   private var navigationChannel: FlutterMethodChannel?
   private var placeActionsChannel: FlutterMethodChannel?
   private var visitMonitoringHandler: IosVisitMonitoringHandler?
   private var carChannel: FlutterMethodChannel?
+  private var speechVoiceChannel: FlutterMethodChannel?
+  private let previewSpeechSynthesizer = AVSpeechSynthesizer()
+  private var pendingPhoneSpeechResult: FlutterResult?
+  private weak var pendingPhoneUtterance: AVSpeechUtterance?
   private var pendingTalkRequest = false
   private var carVoiceTurnActive = false
   private var carVoiceBackgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -24,6 +30,7 @@ import UIKit
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    previewSpeechSynthesizer.delegate = self
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     guard let registrar = engineBridge.pluginRegistry.registrar(
       forPlugin: "IosOnDeviceSpeech"
@@ -32,6 +39,51 @@ import UIKit
       name: "charon/car",
       binaryMessenger: registrar.messenger()
     )
+    speechVoiceChannel = FlutterMethodChannel(
+      name: "private_concierge/speech_voice",
+      binaryMessenger: registrar.messenger()
+    )
+    speechVoiceChannel?.setMethodCallHandler { call, result in
+      switch call.method {
+      case "voices":
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+          .filter { $0.language.lowercased().hasPrefix("en") }
+          .map { ["id": $0.identifier, "name": $0.name, "locale": $0.language] }
+          .sorted { ($0["name"] ?? "") < ($1["name"] ?? "") }
+        result(voices)
+      case "selectedVoice":
+        result(UserDefaults.standard.string(forKey: "charon.speechVoiceId"))
+      case "select":
+        guard let values = call.arguments as? [String: Any],
+          let voiceId = values["voiceId"] as? String
+        else { result(false); return }
+        UserDefaults.standard.set(voiceId, forKey: "charon.speechVoiceId")
+        result(true)
+      case "preview":
+        guard let values = call.arguments as? [String: Any],
+          let voiceId = values["voiceId"] as? String,
+          let text = values["text"] as? String
+        else { result(false); return }
+        self.previewVoice(voiceId: voiceId, text: text)
+        result(true)
+      case "speak":
+        guard let values = call.arguments as? [String: Any],
+          let text = values["text"] as? String
+        else { result(false); return }
+        self.previewSpeechSynthesizer.stopSpeaking(at: .immediate)
+        self.pendingPhoneSpeechResult?(false)
+        self.pendingPhoneSpeechResult = result
+        self.pendingPhoneUtterance = self.previewVoice(
+          voiceId: UserDefaults.standard.string(forKey: "charon.speechVoiceId"),
+          text: text,
+          stopExisting: false
+        )
+      case "installVoices":
+        result(false)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
     carChannel?.setMethodCallHandler { [weak self] call, result in
       if call.method == "publishResult",
         let payload = call.arguments as? [String: Any]
@@ -123,6 +175,47 @@ import UIKit
       guard let url else { result(false); return }
       UIApplication.shared.open(url, options: [:]) { result($0) }
     }
+  }
+
+  @discardableResult
+  private func previewVoice(
+    voiceId: String?,
+    text: String,
+    stopExisting: Bool = true
+  ) -> AVSpeechUtterance {
+    let session = AVAudioSession.sharedInstance()
+    try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+    try? session.setActive(true, options: .notifyOthersOnDeactivation)
+    if stopExisting { previewSpeechSynthesizer.stopSpeaking(at: .immediate) }
+    let utterance = AVSpeechUtterance(string: text)
+    if let voiceId { utterance.voice = AVSpeechSynthesisVoice(identifier: voiceId) }
+    utterance.preUtteranceDelay = 0.2
+    previewSpeechSynthesizer.speak(utterance)
+    return utterance
+  }
+
+  func speechSynthesizer(
+    _ synthesizer: AVSpeechSynthesizer,
+    didFinish utterance: AVSpeechUtterance
+  ) {
+    guard utterance === pendingPhoneUtterance else { return }
+    pendingPhoneSpeechResult?(true)
+    pendingPhoneSpeechResult = nil
+    pendingPhoneUtterance = nil
+    try? AVAudioSession.sharedInstance().setActive(
+      false,
+      options: .notifyOthersOnDeactivation
+    )
+  }
+
+  func speechSynthesizer(
+    _ synthesizer: AVSpeechSynthesizer,
+    didCancel utterance: AVSpeechUtterance
+  ) {
+    guard utterance === pendingPhoneUtterance else { return }
+    pendingPhoneSpeechResult?(false)
+    pendingPhoneSpeechResult = nil
+    pendingPhoneUtterance = nil
   }
 
   override func application(

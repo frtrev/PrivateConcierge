@@ -88,6 +88,7 @@ class _PrivateConciergeAppState extends State<PrivateConciergeApp> {
       themeMode: widget.dependencies.themeController.mode,
       home: widget.dependencies.profileService.load() == null
           ? ProfileOnboardingScreen(
+              speechVoices: widget.dependencies.speechVoices,
               onComplete: (profile) async {
                 await widget.dependencies.profileService.save(profile);
                 if (mounted) setState(() {});

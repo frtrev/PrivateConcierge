@@ -1,25 +1,132 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../core/models/user_profile.dart';
+import '../../services/voice/speech_voice_service.dart';
 
 class ProfileOnboardingScreen extends StatefulWidget {
-  const ProfileOnboardingScreen({super.key, required this.onComplete});
+  const ProfileOnboardingScreen({
+    super.key,
+    required this.onComplete,
+    required this.speechVoices,
+    this.initialProfile,
+    this.editing = false,
+  });
 
   final Future<void> Function(UserProfile profile) onComplete;
+  final SpeechVoiceService speechVoices;
+  final UserProfile? initialProfile;
+  final bool editing;
 
   @override
   State<ProfileOnboardingScreen> createState() =>
       _ProfileOnboardingScreenState();
 }
 
-class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
+class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen>
+    with WidgetsBindingObserver {
   final nameController = TextEditingController();
   String address = 'name';
   String personality = 'warm';
+  String voiceGender = 'male';
   bool saving = false;
+  late Future<List<SpeechVoice>> voices;
+  String? selectedVoiceId;
+  bool noVoicesFound = false;
+  late Future<List<SpeechEngine>> engines;
+  String? selectedEngineId;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final profile = widget.initialProfile;
+    if (profile != null) {
+      nameController.text = profile.name;
+      address = profile.addressStyle;
+      personality = profile.personality;
+      voiceGender = profile.voiceGender;
+    }
+    engines = _loadEngines();
+    voices = _loadVoices();
+  }
+
+  Future<List<SpeechEngine>> _loadEngines() async {
+    if (!Platform.isAndroid) return const [];
+    final values = await widget.speechVoices.engines();
+    selectedEngineId = await widget.speechVoices.selectedEngineId();
+    if (selectedEngineId == null && values.isNotEmpty) {
+      selectedEngineId = values.first.id;
+    }
+    return values;
+  }
+
+  Future<List<SpeechVoice>> _loadVoices() async {
+    final values = await widget.speechVoices.voices();
+    selectedVoiceId = await widget.speechVoices.selectedVoiceId();
+    if (selectedVoiceId == null && values.isNotEmpty) {
+      selectedVoiceId = _preferredVoice(values, voiceGender).id;
+    }
+    noVoicesFound = values.isEmpty;
+    return values;
+  }
+
+  SpeechVoice _preferredVoice(List<SpeechVoice> values, String gender) {
+    if (Platform.isAndroid) {
+      final googleSuffix = gender == 'female' ? 'iob-network' : 'iom-network';
+      for (final voice in values) {
+        if (voice.name.toLowerCase().contains(googleSuffix)) return voice;
+      }
+      return values.firstWhere(
+        (voice) => voice.id == 'system:default',
+        orElse: () => values.first,
+      );
+    }
+    final preferredName = gender == 'female' ? 'tessa' : 'daniel';
+    return values.cast<SpeechVoice?>().firstWhere(
+      (voice) => voice!.name.toLowerCase() == preferredName,
+      orElse: () => values.first,
+    )!;
+  }
+
+  Future<void> _chooseVoiceGender(String gender) async {
+    setState(() => voiceGender = gender);
+    final values = await voices;
+    if (values.isEmpty || !mounted) return;
+    final voice = _preferredVoice(values, gender);
+    setState(() => selectedVoiceId = voice.id);
+    await _preview(voice.id);
+  }
+
+  Future<void> _preview(String voiceId) async {
+    final profile = UserProfile(
+      addressStyle: address,
+      name: nameController.text.trim(),
+      personality: personality,
+      voiceGender: voiceGender,
+    );
+    final preferred = profile.preferredAddress.trim();
+    await widget.speechVoices.preview(
+      voiceId: voiceId,
+      text: preferred.isEmpty ? 'Hello.' : 'Hello, $preferred.',
+    );
+  }
+
+  void _refreshVoices() {
+    setState(() => voices = _loadVoices());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && noVoicesFound) {
+      _refreshVoices();
+    }
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     nameController.dispose();
     super.dispose();
   }
@@ -38,7 +145,7 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
           ),
           const SizedBox(height: 24),
           Text(
-            'Make your concierge yours',
+            widget.editing ? 'Assistant settings' : 'Make your concierge yours',
             style: Theme.of(context).textTheme.headlineMedium,
             textAlign: TextAlign.center,
           ),
@@ -115,6 +222,136 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 24),
+          const Text('Voice style'),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'male', label: Text('Male')),
+              ButtonSegment(value: 'female', label: Text('Female')),
+            ],
+            selected: {voiceGender},
+            onSelectionChanged: (selection) =>
+                _chooseVoiceGender(selection.first),
+          ),
+          const SizedBox(height: 28),
+          const Text('Charon voice'),
+          const SizedBox(height: 8),
+          if (Platform.isAndroid) ...[
+            FutureBuilder<List<SpeechEngine>>(
+              future: engines,
+              builder: (context, snapshot) {
+                final values = snapshot.data ?? const <SpeechEngine>[];
+                if (!snapshot.hasData) return const LinearProgressIndicator();
+                if (values.isEmpty) {
+                  return const Text('No text-to-speech engines were found.');
+                }
+                return DropdownButtonFormField<String>(
+                  key: ValueKey(selectedEngineId),
+                  initialValue:
+                      values.any((engine) => engine.id == selectedEngineId)
+                      ? selectedEngineId
+                      : values.first.id,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'Speech engine',
+                  ),
+                  items: [
+                    for (final engine in values)
+                      DropdownMenuItem(
+                        value: engine.id,
+                        child: Text(engine.name),
+                      ),
+                  ],
+                  onChanged: (engineId) async {
+                    if (engineId == null) return;
+                    await widget.speechVoices.selectEngine(engineId);
+                    if (!mounted) return;
+                    setState(() {
+                      selectedEngineId = engineId;
+                      selectedVoiceId = null;
+                      voices = _loadVoices();
+                    });
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+          FutureBuilder<List<SpeechVoice>>(
+            future: voices,
+            builder: (context, snapshot) {
+              final values = snapshot.data ?? const <SpeechVoice>[];
+              if (!snapshot.hasData) {
+                return const LinearProgressIndicator();
+              }
+              if (values.isEmpty) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('No installed English voices were found.'),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final opened = await widget.speechVoices
+                            .installVoices();
+                        if (!opened && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Voice installation is managed in your device text-to-speech settings.',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.download_outlined),
+                      label: const Text('Install voices'),
+                    ),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(selectedVoiceId),
+                    initialValue:
+                        values.any((voice) => voice.id == selectedVoiceId)
+                        ? selectedVoiceId
+                        : values.first.id,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Voice',
+                    ),
+                    items: [
+                      for (final voice in values)
+                        DropdownMenuItem(
+                          value: voice.id,
+                          child: Text('${voice.name} (${voice.locale})'),
+                        ),
+                    ],
+                    onChanged: (voiceId) async {
+                      if (voiceId == null) return;
+                      setState(() => selectedVoiceId = voiceId);
+                      await _preview(voiceId);
+                    },
+                  ),
+                  if (Platform.isAndroid) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: widget.speechVoices.installVoices,
+                      icon: const Icon(Icons.download_outlined),
+                      label: const Text('Install more voices'),
+                    ),
+                    const Text(
+                      'System default uses the voice selected in Android text-to-speech settings.',
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
           const SizedBox(height: 28),
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: nameController,
@@ -124,16 +361,27 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
                   : () async {
                       FocusScope.of(context).unfocus();
                       setState(() => saving = true);
+                      final voiceId = selectedVoiceId;
+                      if (voiceId != null) {
+                        await widget.speechVoices.select(voiceId);
+                      }
                       await widget.onComplete(
                         UserProfile(
                           addressStyle: address,
                           name: nameController.text.trim(),
                           personality: personality,
+                          voiceGender: voiceGender,
                         ),
                       );
                     },
               icon: const Icon(Icons.check),
-              label: Text(saving ? 'Saving…' : 'Continue'),
+              label: Text(
+                saving
+                    ? 'Saving…'
+                    : widget.editing
+                    ? 'Save changes'
+                    : 'Continue',
+              ),
             ),
           ),
         ],

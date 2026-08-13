@@ -408,13 +408,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           IconButton(
-            tooltip: 'Privacy settings',
-            icon: const Icon(Icons.privacy_tip_outlined),
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) =>
-                    PrivacyScreen(privateData: widget.dependencies.privateData),
+                builder: (_) => PrivacyScreen(
+                  privateData: widget.dependencies.privateData,
+                  profileService: widget.dependencies.profileService,
+                  speechVoices: widget.dependencies.speechVoices,
+                ),
               ),
             ),
           ),

@@ -3,6 +3,8 @@ package com.neotheone.privateconcierge.car
 import android.content.Intent
 import android.net.Uri
 import android.speech.tts.TextToSpeech
+import android.content.Context
+import java.util.Locale
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
@@ -25,11 +27,26 @@ class CarAssistantResultScreen(
         val spoken = payload["spokenResponse"] as? String
             ?: payload["response"] as? String
             ?: "Charon finished the request."
-        textToSpeech = TextToSpeech(carContext) { status ->
+        val preferences = carContext.getSharedPreferences("charon_speech", Context.MODE_PRIVATE)
+        val engineId = preferences.getString("engine_id", null)
+            ?: GOOGLE_TTS_PACKAGE.takeIf { packageName ->
+                runCatching {
+                    carContext.packageManager.getPackageInfo(packageName, 0)
+                }.isSuccess
+            }
+        textToSpeech = TextToSpeech(carContext, { status ->
             if (status == TextToSpeech.SUCCESS) {
+                val voiceId = preferences.getString("voice_id", null)
+                if (voiceId == "system:default") {
+                    // Keep the engine-selected default voice configured by the user.
+                } else if (voiceId?.startsWith("locale:") == true) {
+                    textToSpeech?.language = Locale.forLanguageTag(voiceId.removePrefix("locale:"))
+                } else {
+                    textToSpeech?.voice = textToSpeech?.voices?.firstOrNull { it.name == voiceId }
+                }
                 textToSpeech?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "charon-result")
             }
-        }
+        }, engineId)
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
                 textToSpeech?.stop()
@@ -116,6 +133,7 @@ class CarAssistantResultScreen(
 
     companion object {
         private const val PAGE_SIZE = 4
+        private const val GOOGLE_TTS_PACKAGE = "com.google.android.tts"
 
         fun firstPlace(payload: Map<String, Any?>): CarPlaceResult? =
             parsePlaces(payload).firstOrNull()

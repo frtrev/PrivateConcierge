@@ -8,6 +8,7 @@ class UserProfileService {
   static const _addressKey = 'profile.address';
   static const _nameKey = 'profile.name';
   static const _personalityKey = 'profile.personality';
+  static const _voiceGenderKey = 'profile.voiceGender';
 
   final SharedPreferences _preferences;
 
@@ -18,6 +19,7 @@ class UserProfileService {
       addressStyle: address,
       name: _preferences.getString(_nameKey) ?? '',
       personality: _preferences.getString(_personalityKey) ?? 'warm',
+      voiceGender: _preferences.getString(_voiceGenderKey) ?? 'male',
     );
   }
 
@@ -25,5 +27,6 @@ class UserProfileService {
     await _preferences.setString(_addressKey, profile.addressStyle);
     await _preferences.setString(_nameKey, profile.name);
     await _preferences.setString(_personalityKey, profile.personality);
+    await _preferences.setString(_voiceGenderKey, profile.voiceGender);
   }
 }

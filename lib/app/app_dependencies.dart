@@ -23,6 +23,7 @@ import '../services/query/response_generator.dart';
 import '../services/routines/routine_engine.dart';
 import '../services/storage/private_data_store.dart';
 import '../services/voice/voice_recognition_service.dart';
+import '../services/voice/speech_voice_service.dart';
 import '../services/visits/visit_tracker.dart';
 import '../core/models/geo.dart';
 import 'app_theme_controller.dart';
@@ -42,6 +43,7 @@ class AppDependencies {
     required this.queryEngine,
     required this.navigation,
     required this.assistant,
+    required this.speechVoices,
   });
   final BootstrapService bootstrap;
   final RegionPackageManager packages;
@@ -56,6 +58,7 @@ class AppDependencies {
   final LocalQueryEngine queryEngine;
   final NavigationService navigation;
   final AssistantEngine assistant;
+  final SpeechVoiceService speechVoices;
   static Future<AppDependencies> create() async {
     final preferences = await SharedPreferences.getInstance();
     final poi = SqlitePoiRepository();
@@ -144,6 +147,7 @@ class AppDependencies {
       queryEngine: queryEngine,
       navigation: const PlatformNavigationService(),
       assistant: assistant,
+      speechVoices: const SpeechVoiceService(),
       bootstrap: bootstrap,
     );
   }

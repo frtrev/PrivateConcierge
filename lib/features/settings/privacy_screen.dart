@@ -1,16 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/storage/private_data_store.dart';
+import '../../services/profile/user_profile_service.dart';
+import '../../services/voice/speech_voice_service.dart';
+import '../onboarding/profile_onboarding_screen.dart';
 
 class PrivacyScreen extends StatelessWidget {
-  const PrivacyScreen({super.key, required this.privateData});
+  const PrivacyScreen({
+    super.key,
+    required this.privateData,
+    required this.profileService,
+    required this.speechVoices,
+  });
   final PrivateDataStore privateData;
+  final UserProfileService profileService;
+  final SpeechVoiceService speechVoices;
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Privacy')),
+    appBar: AppBar(title: const Text('Settings')),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        ListTile(
+          leading: const Icon(Icons.record_voice_over_outlined),
+          title: const Text('Assistant profile and voice'),
+          subtitle: const Text('Address, personality, and spoken voice'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => ProfileOnboardingScreen(
+                initialProfile: profileService.load(),
+                editing: true,
+                speechVoices: speechVoices,
+                onComplete: (profile) async {
+                  await profileService.save(profile);
+                  if (context.mounted) Navigator.pop(context);
+                },
+              ),
+            ),
+          ),
+        ),
+        const Divider(),
         const ListTile(
           leading: Icon(Icons.location_on_outlined),
           title: Text('Location processing'),

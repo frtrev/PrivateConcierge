@@ -38,6 +38,7 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   String response =
       'Tap the microphone and ask about your location or nearby places.';
   PointOfInterest? selectedPlace;
+  AssistantResult? assistantResult;
   bool openingMaps = false;
 
   @override
@@ -98,10 +99,12 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
       transcript = text.trim();
       state = VoiceRecognitionState.processing;
       selectedPlace = null;
+      assistantResult = null;
     });
     final answer = await widget.dependencies.assistant.answer(text);
-    response = answer.response;
+    response = answer.spokenResponse;
     selectedPlace = answer.selectedPlace?.toPoi();
+    assistantResult = answer;
     try {
       await _carChannel.invokeMethod<void>('publishResult', answer.toMap());
     } on PlatformException {
@@ -123,11 +126,24 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
       if (place != null) {
         final opened = await widget.dependencies.navigation.navigateTo(place);
         if (!opened) {
-          response = 'I could not open the maps app. ${answer.response}';
+          response = 'I could not open the maps app. ${answer.spokenResponse}';
         }
       }
     }
+    final asksFollowUp =
+        answer.type != AssistantResultType.navigation &&
+        answer.spokenResponse.trimRight().endsWith('?');
+    if (answer.type != AssistantResultType.navigation) {
+      try {
+        await widget.dependencies.speechVoices.speak(answer.spokenResponse);
+      } on PlatformException {
+        // Text remains available if speech synthesis is unavailable.
+      }
+    }
     if (mounted) setState(() => state = VoiceRecognitionState.completed);
+    if (asksFollowUp && mounted) {
+      await _listen();
+    }
   }
 
   Future<void> _invokePlaceAction(String method, String value) async {
@@ -164,6 +180,37 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     }
   }
 
+  Future<void> _openPlaceInMaps(PlaceResult place) async {
+    if (openingMaps) return;
+    setState(() => openingMaps = true);
+    final opened = await widget.dependencies.navigation.navigateTo(
+      place.toPoi(),
+    );
+    if (!mounted) return;
+    setState(() => openingMaps = false);
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('I could not open the maps app.')),
+      );
+    }
+  }
+
+  String _placeDetail(PlaceResult place) {
+    final details = <String>[];
+    final meters = place.distanceMeters;
+    if (meters != null) {
+      details.add('${(meters / 1609.344).toStringAsFixed(1)} miles');
+    }
+    if (place.isOpenNow != null) {
+      details.add(place.isOpenNow! ? 'Open now' : 'Closed');
+    }
+    if (place.address.trim().isNotEmpty) details.add(place.address.trim());
+    if (details.isEmpty && place.category.isNotEmpty) {
+      details.add(place.category);
+    }
+    return details.join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Assistant')),
@@ -195,21 +242,31 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(response),
-                          if (selectedPlace != null) ...[
+                          if (assistantResult?.places.isNotEmpty == true) ...[
+                            const SizedBox(height: 12),
+                            for (final place in assistantResult!.places)
+                              Card.outlined(
+                                child: ListTile(
+                                  title: Text(place.name),
+                                  subtitle: Text(_placeDetail(place)),
+                                  trailing: IconButton(
+                                    tooltip: 'Open in Maps',
+                                    onPressed: openingMaps
+                                        ? null
+                                        : () => _openPlaceInMaps(place),
+                                    icon: const Icon(Icons.directions_outlined),
+                                  ),
+                                  onTap: openingMaps
+                                      ? null
+                                      : () => _openPlaceInMaps(place),
+                                ),
+                              ),
+                          ] else if (selectedPlace != null) ...[
                             const SizedBox(height: 12),
                             OutlinedButton.icon(
                               onPressed: openingMaps ? null : _openInMaps,
-                              icon: openingMaps
-                                  ? const SizedBox.square(
-                                      dimension: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.map_outlined),
-                              label: Text(
-                                openingMaps ? 'Opening…' : 'Open in Maps',
-                              ),
+                              icon: const Icon(Icons.map_outlined),
+                              label: const Text('Open in Maps'),
                             ),
                           ],
                         ],

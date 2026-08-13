@@ -288,6 +288,11 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
           guard let self else { return }
           let utterance = AVSpeechUtterance(string: response)
+          if let voiceId = UserDefaults.standard.string(
+            forKey: "charon.speechVoiceId"
+          ) {
+            utterance.voice = AVSpeechSynthesisVoice(identifier: voiceId)
+          }
           utterance.preUtteranceDelay = 0.15
           self.speechSynthesizer.speak(utterance)
         }
