@@ -25,6 +25,7 @@ import '../services/storage/private_data_store.dart';
 import '../services/voice/voice_recognition_service.dart';
 import '../services/voice/speech_voice_service.dart';
 import '../services/visits/visit_tracker.dart';
+import '../services/tracking/tracking_query_engine.dart';
 import '../core/models/geo.dart';
 import 'app_theme_controller.dart';
 
@@ -127,6 +128,7 @@ class AppDependencies {
       packages: packages,
       nearby: nearby,
       profiles: profiles,
+      tracking: TrackingQueryEngine(privateData),
     );
     return AppDependencies._(
       packages: packages,

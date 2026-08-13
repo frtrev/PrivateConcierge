@@ -125,6 +125,7 @@ class DrivingContextEngine {
         );
       } else if (previousMode == MotionMode.driving &&
           estimate.mode == MotionMode.stationary) {
+        await privateData.recordParking(coordinates, at);
         await notifications.show(
           id: 21002,
           title: 'Parking detected',

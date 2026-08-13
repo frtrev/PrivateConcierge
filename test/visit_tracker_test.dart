@@ -4,6 +4,7 @@ import 'package:private_concierge/core/models/poi.dart';
 import 'package:private_concierge/core/models/visited_place.dart';
 import 'package:private_concierge/core/models/unknown_place_candidate.dart';
 import 'package:private_concierge/core/models/visit_session.dart';
+import 'package:private_concierge/core/models/parking_event.dart';
 import 'package:private_concierge/services/location/location_service.dart';
 import 'package:private_concierge/services/storage/private_data_store.dart';
 import 'package:private_concierge/services/visits/visit_tracker.dart';
@@ -35,6 +36,8 @@ class MemoryPrivateDataStore implements PrivateDataStore {
   final custom = <PointOfInterest>[];
   final unknownStays = <Coordinates>[];
   final sessions = <VisitSession>[];
+  final parking = <ParkingEvent>[];
+  final aggregate = <VisitedPlace>[];
   @override
   Future<void> open() async {}
   @override
@@ -86,7 +89,7 @@ class MemoryPrivateDataStore implements PrivateDataStore {
   }
 
   @override
-  Future<List<VisitedPlace>> mostVisited() async => [];
+  Future<List<VisitedPlace>> mostVisited() async => aggregate;
   @override
   Future<void> deleteVisitHistory() async => recorded.clear();
   @override
@@ -133,6 +136,15 @@ class MemoryPrivateDataStore implements PrivateDataStore {
 
   @override
   Future<List<VisitSession>> visitSessions() async => sessions;
+  @override
+  Future<void> recordParking(Coordinates coordinates, DateTime at) async =>
+      parking.add(
+        ParkingEvent(id: parking.length + 1, coordinates: coordinates, at: at),
+      );
+  @override
+  Future<List<ParkingEvent>> parkingEvents() async => parking;
+  @override
+  Future<void> deleteParkingEvents() async => parking.clear();
 }
 
 void main() {

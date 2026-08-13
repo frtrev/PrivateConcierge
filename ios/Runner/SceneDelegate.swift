@@ -386,7 +386,11 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
       let detail = [miles, address.isEmpty ? nil : address]
         .compactMap { $0 }
         .joined(separator: " · ")
-      let item = CPListItem(text: name, detailText: detail)
+      let visitTimes = visitTimeDetail(place)
+      let fullDetail = [detail.isEmpty ? nil : detail, visitTimes]
+        .compactMap { $0 }
+        .joined(separator: "\n")
+      let item = CPListItem(text: name, detailText: fullDetail)
       item.handler = { [weak self] _, completion in
         self?.showPlace(place)
         completion()
@@ -402,11 +406,27 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     return items
   }
 
+  private func visitTimeDetail(_ place: [String: Any]) -> String? {
+    guard let arrivalMs = (place["arrivalMs"] as? NSNumber)?.doubleValue else {
+      return nil
+    }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "MM/dd h:mm a"
+    let arrival = formatter.string(from: Date(timeIntervalSince1970: arrivalMs / 1000))
+    let departure = (place["departureMs"] as? NSNumber).map {
+      formatter.string(from: Date(timeIntervalSince1970: $0.doubleValue / 1000))
+    } ?? "Still there"
+    return "Arrived: \(arrival)  Left: \(departure)"
+  }
+
   private func showPlace(_ place: [String: Any]) {
     guard let interfaceController else { return }
     let name = place["name"] as? String ?? "Place"
     let address = place["address"] as? String ?? ""
-    let detail = CPListItem(text: name, detailText: address)
+    let detailText = [address.isEmpty ? nil : address, visitTimeDetail(place)]
+      .compactMap { $0 }
+      .joined(separator: "\n")
+    let detail = CPListItem(text: name, detailText: detailText)
     let navigate = CPListItem(
       text: "Navigate",
       detailText: "Open the route in Maps, then tap Go"

@@ -11,6 +11,7 @@ import '../../services/nearby/nearby_service.dart';
 import '../../services/profile/user_profile_service.dart';
 import '../../services/query/local_query_engine.dart';
 import '../../services/query/place_detail_follow_up.dart';
+import '../../services/tracking/tracking_query_engine.dart';
 
 class AssistantEngine {
   AssistantEngine({
@@ -20,6 +21,7 @@ class AssistantEngine {
     required this.packages,
     required this.nearby,
     required this.profiles,
+    required this.tracking,
     PlaceDetailFollowUpResolver? placeDetails,
   }) : placeDetails = placeDetails ?? PlaceDetailFollowUpResolver();
 
@@ -30,6 +32,7 @@ class AssistantEngine {
   final NearbyService nearby;
   final UserProfileService profiles;
   final PlaceDetailFollowUpResolver placeDetails;
+  final TrackingQueryEngine tracking;
 
   Future<AssistantResult> answer(String text) async {
     final normalized = text
@@ -45,6 +48,8 @@ class AssistantEngine {
         context: AssistantConversationState(lastIntent: 'declinedFollowUp'),
       );
     }
+    final trackingAnswer = await tracking.answer(text);
+    if (trackingAnswer != null) return _personalizeResult(trackingAnswer);
     final detailAnswer = _placeDetailFollowUp(text);
     if (detailAnswer != null) return detailAnswer;
     final answer = await queries.answer(text, origin: bootstrap.coordinates);
@@ -52,6 +57,18 @@ class AssistantEngine {
       return _fromQuery(answer);
     }
     return _fromCommand(text);
+  }
+
+  AssistantResult _personalizeResult(AssistantResult result) {
+    final spoken = result.spokenResponse;
+    return AssistantResult(
+      response: _personalize(spoken),
+      spokenResponse: _personalize(spoken),
+      type: result.type,
+      places: result.places,
+      actions: result.actions,
+      context: result.context,
+    );
   }
 
   AssistantResult? _placeDetailFollowUp(String text) {

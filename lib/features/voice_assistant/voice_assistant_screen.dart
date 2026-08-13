@@ -208,7 +208,18 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     if (details.isEmpty && place.category.isNotEmpty) {
       details.add(place.category);
     }
+    if (place.arrival != null) {
+      details.add(
+        'Arrived: ${_visitTimestamp(place.arrival!)}  Left: ${place.departure == null ? 'Still there' : _visitTimestamp(place.departure!)}',
+      );
+    }
     return details.join(' · ');
+  }
+
+  String _visitTimestamp(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final suffix = value.hour >= 12 ? 'PM' : 'AM';
+    return '${value.month.toString().padLeft(2, '0')}/${value.day.toString().padLeft(2, '0')} $hour:${value.minute.toString().padLeft(2, '0')} $suffix';
   }
 
   @override

@@ -5,6 +5,8 @@ import android.net.Uri
 import android.speech.tts.TextToSpeech
 import android.content.Context
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
@@ -176,7 +178,9 @@ data class CarPlaceResult(
     val distanceMeters: Double?,
     val phoneNumber: String?,
     val website: String?,
-    val isOpenNow: Boolean?
+    val isOpenNow: Boolean?,
+    val arrivalMs: Long?,
+    val departureMs: Long?
 ) {
     companion object {
         fun from(payload: Map<String, Any?>): CarPlaceResult? {
@@ -189,10 +193,19 @@ data class CarPlaceResult(
             val phone = payload["phoneNumber"] as? String
             val website = payload["website"] as? String
             val isOpenNow = payload["isOpenNow"] as? Boolean
+            val arrivalMs = (payload["arrivalMs"] as? Number)?.toLong()
+            val departureMs = (payload["departureMs"] as? Number)?.toLong()
             val miles = meters?.let { "%.1f miles".format(it / 1609.344) }
             val status = isOpenNow?.let { if (it) "Open now" else "Closed" }
-            val detail = listOfNotNull(status, miles, address.takeIf(String::isNotBlank)).joinToString(" · ")
-            return CarPlaceResult(name, latitude, longitude, detail, address, category, meters, phone, website, isOpenNow)
+            val formatter = SimpleDateFormat("MM/dd h:mm a", Locale.US)
+            val visitTimes = arrivalMs?.let {
+                "Arrived: ${formatter.format(Date(it))}  Left: ${departureMs?.let { value -> formatter.format(Date(value)) } ?: "Still there"}"
+            }
+            val detail = listOfNotNull(
+                listOfNotNull(status, miles, address.takeIf(String::isNotBlank)).joinToString(" · ").takeIf(String::isNotBlank),
+                visitTimes
+            ).joinToString("\n")
+            return CarPlaceResult(name, latitude, longitude, detail, address, category, meters, phone, website, isOpenNow, arrivalMs, departureMs)
         }
     }
 }

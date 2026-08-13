@@ -29,6 +29,8 @@ class PlaceResult {
     this.website,
     this.openingHours,
     this.isOpenNow,
+    this.arrival,
+    this.departure,
   });
 
   factory PlaceResult.fromPoi(PointOfInterest poi) => PlaceResult(
@@ -58,6 +60,8 @@ class PlaceResult {
   final String? website;
   final PlaceOpeningHours? openingHours;
   final bool? isOpenNow;
+  final DateTime? arrival;
+  final DateTime? departure;
 
   Map<String, Object?> toMap() => {
     'id': id,
@@ -72,6 +76,8 @@ class PlaceResult {
     'website': website,
     'openingHours': openingHours?.toMap(),
     'isOpenNow': isOpenNow,
+    'arrivalMs': arrival?.millisecondsSinceEpoch,
+    'departureMs': departure?.millisecondsSinceEpoch,
   };
 
   PointOfInterest toPoi() => PointOfInterest(
