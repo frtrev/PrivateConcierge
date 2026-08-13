@@ -175,11 +175,18 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
       RegExp(r'\b(nearest|closest|closest one|nearest one)\b').hasMatch(text);
 
   int? _findLimit(String text) {
+    final topNumeric = RegExp(r'\btop\s+(\d{1,2})\b').firstMatch(text);
+    if (topNumeric != null) {
+      return int.parse(topNumeric.group(1)!).clamp(1, 20);
+    }
     final numeric = RegExp(
       r'\b(\d{1,2})\s+(?:closest|nearest|nearby|restaurants?|places?|stores?|stations?)\b',
     ).firstMatch(text);
     if (numeric != null) return int.parse(numeric.group(1)!).clamp(1, 20);
     for (final entry in PlaceVocabulary.numberWords.entries) {
+      if (RegExp('\\btop\\s+${entry.key}\\b').hasMatch(text)) {
+        return entry.value;
+      }
       if (RegExp(
         '\\b${entry.key}\\s+(?:closest|nearest|nearby|restaurants?|places?|stores?|stations?)\\b',
       ).hasMatch(text)) {

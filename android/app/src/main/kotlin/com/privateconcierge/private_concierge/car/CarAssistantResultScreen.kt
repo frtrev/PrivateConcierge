@@ -16,7 +16,8 @@ import androidx.lifecycle.LifecycleOwner
 
 class CarAssistantResultScreen(
     carContext: CarContext,
-    private val payload: Map<String, Any?>
+    private val payload: Map<String, Any?>,
+    private val offset: Int = 0
 ) : Screen(carContext) {
     private var textToSpeech: TextToSpeech? = null
 
@@ -45,13 +46,30 @@ class CarAssistantResultScreen(
         val places = places()
         if (places.size > 1) {
             val items = ItemList.Builder()
-            places.take(5).forEach { place ->
+            places.drop(offset).take(PAGE_SIZE).forEach { place ->
                 items.addItem(
                     Row.Builder()
                         .setTitle(place.name)
                         .addText(place.detail)
                         .setOnClickListener {
                             screenManager.push(CarPlaceResultScreen(carContext, place))
+                        }
+                        .build()
+                )
+            }
+            if (offset + PAGE_SIZE < places.size) {
+                items.addItem(
+                    Row.Builder()
+                        .setTitle("More results")
+                        .addText("Show the next nearby places")
+                        .setOnClickListener {
+                            screenManager.push(
+                                CarAssistantResultScreen(
+                                    carContext,
+                                    payload,
+                                    offset + PAGE_SIZE
+                                )
+                            )
                         }
                         .build()
                 )
@@ -89,7 +107,7 @@ class CarAssistantResultScreen(
         return template.build()
     }
 
-    private fun places(): List<CarPlaceResult> = parsePlaces(payload)
+    private fun places(): List<CarPlaceResult> = parsePlaces(payload).take(10)
 
     private fun navigate(place: CarPlaceResult) {
         val uri = Uri.parse("geo:${place.latitude},${place.longitude}?q=${place.latitude},${place.longitude}(${Uri.encode(place.name)})")
@@ -97,6 +115,8 @@ class CarAssistantResultScreen(
     }
 
     companion object {
+        private const val PAGE_SIZE = 4
+
         fun firstPlace(payload: Map<String, Any?>): CarPlaceResult? =
             parsePlaces(payload).firstOrNull()
 

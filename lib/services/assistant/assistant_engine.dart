@@ -207,6 +207,9 @@ distance=${place.distanceMeters == null ? 'unavailable' : 'calculated locally'}
   }
 
   String _vehicleResponse(QueryAnswer answer, PointOfInterest? selected) {
+    if (answer.result.places.length > 1) {
+      return vehiclePlaceListSummary(answer);
+    }
     if (selected == null) return answer.text;
     if (answer.result.navigationRequested) {
       return 'Starting directions to ${selected.name}.';
@@ -233,4 +236,12 @@ distance=${place.distanceMeters == null ? 'unavailable' : 'calculated locally'}
 
   String _describe(List<PointOfInterest> points) =>
       'Nearby: ${points.take(3).map((point) => '${point.name}, ${(point.distanceMeters! / 1609.344).toStringAsFixed(1)} miles').join('; ')}.';
+}
+
+String vehiclePlaceListSummary(QueryAnswer answer) {
+  if (answer.plan.limit > 10) {
+    return 'I can only display up to 10 nearby places, here they are:';
+  }
+  final displayedCount = answer.result.places.length.clamp(0, 10);
+  return 'I found $displayedCount places, here they are:';
 }

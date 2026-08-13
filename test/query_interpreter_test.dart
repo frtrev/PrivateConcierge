@@ -105,6 +105,19 @@ void main() {
       expect(named.placeQuery?.searchTerm, 'memphis pizza cafe');
     });
 
+    test('respects top result counts', () {
+      final topThree = interpreter.interpret('Top 3 donut places');
+      expect(topThree.placeQuery?.searchTerm, 'donut');
+      expect(topThree.placeQuery?.limit, 3);
+
+      final topTen = interpreter.interpret('Top 10 donut places');
+      expect(topTen.placeQuery?.searchTerm, 'donut');
+      expect(topTen.placeQuery?.limit, 10);
+
+      final topThreeWords = interpreter.interpret('Top three donut places');
+      expect(topThreeWords.placeQuery?.limit, 3);
+    });
+
     test("parses closest BP", () {
       final result = interpreter.interpret("Where's the closest BP?");
       expect(result.intent, LocalQueryIntent.findPoi);

@@ -295,13 +295,10 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     places: [[String: Any]]
   ) -> [CPListItem] {
     let responseItem = CPListItem(text: response, detailText: nil)
-    if #available(iOS 15.0, *) {
-      responseItem.isEnabled = false
-    } else {
-      responseItem.handler = { _, completion in completion() }
-    }
+    responseItem.handler = { _, completion in completion() }
     var items = [responseItem]
-    for place in places.prefix(5) {
+    // CarPlay allows twelve rows here: the response, up to ten places, and Go Back.
+    for place in places.prefix(10) {
       let name = place["name"] as? String ?? "Place"
       let address = place["address"] as? String ?? ""
       let distance = (place["distanceMeters"] as? NSNumber)?.doubleValue
