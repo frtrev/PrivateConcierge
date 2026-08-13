@@ -37,6 +37,7 @@ class PlaceVocabulary {
     'movie theatre': 'entertainment',
     'cinema': 'entertainment',
     'theater': 'entertainment',
+    'churches': 'church',
     'church': 'church',
     'gym': 'gym',
     'park': 'park',
@@ -104,6 +105,11 @@ class PlaceVocabulary {
     ),
     PlaceBrand(name: 'Walmart', category: 'shopping', aliases: {'walmart'}),
     PlaceBrand(name: 'Target', category: 'shopping', aliases: {'target'}),
+    PlaceBrand(
+      name: 'NAPA Auto Parts',
+      category: 'shopping',
+      aliases: {'napa', 'napa auto parts'},
+    ),
     PlaceBrand(
       name: 'Home Depot',
       category: 'hardware',

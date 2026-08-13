@@ -22,6 +22,12 @@ activity history remain local after installation.
 
 Visited places are a separate private dataset in `private_user_data.db`. While the app is in the foreground, it checks the current location every 30 seconds. Remaining within 75 meters of the same downloaded POI for two minutes records one visit; another count requires at least four hours. Only the aggregate place, count, and first/last timestamps are stored—no raw route history. Visit history can be deleted independently from the Privacy screen.
 
+Tracking diagnostics are separate from visit history. The database retains the
+newest 500 diagnostic events and the diagnostics sheet displays the newest 200.
+Aggregate visited places and completed visit sessions have no automatic retention
+cap. See [OPEN_ISSUES.md](OPEN_ISSUES.md) for planned history and diagnostic UI
+improvements.
+
 The private database also contains a small user-managed custom POI layer. **My places → Set current location** saves Home, Work, or another named tag using the device's current coordinates. Custom POIs are matched before public Overture places, can accumulate visits in Most Visited, remain available independently of downloaded regions, and can be deleted separately.
 
 ## Run

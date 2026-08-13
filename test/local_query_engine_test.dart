@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:private_concierge/core/models/geo.dart';
 import 'package:private_concierge/core/models/local_query.dart';
+import 'package:private_concierge/core/models/opening_hours.dart';
 import 'package:private_concierge/core/models/poi.dart';
 import 'package:private_concierge/repositories/poi_repository.dart';
 import 'package:private_concierge/services/nearby/nearby_service.dart';
@@ -241,6 +242,47 @@ void main() {
     }
   });
 
+  test('top searches work with prefixes, plurals, and NAPA brand', () async {
+    final points = <PointOfInterest>[
+      for (var index = 0; index < 6; index++)
+        PointOfInterest(
+          id: 'church-$index',
+          regionId: 'r',
+          name: 'Church $index',
+          coordinates: Coordinates(35 + (index + 1) / 1000, -90),
+          category: 'church',
+          subcategory: 'place_of_worship',
+          address: '$index Church Street',
+        ),
+      const PointOfInterest(
+        id: 'napa',
+        regionId: 'r',
+        name: 'NAPA Auto Parts',
+        coordinates: Coordinates(35.01, -90),
+        category: 'automotive',
+        subcategory: 'auto_parts_store',
+        address: '1 Parts Way',
+      ),
+    ];
+
+    for (final phrase in [
+      'Top 5 churches',
+      'Top five churches',
+      'Show me the top five churches',
+      'Find me the top five churches',
+    ]) {
+      final answer = await makeEngine(
+        points: points,
+      ).answer(phrase, origin: origin);
+      expect(answer.result.places, hasLength(5), reason: phrase);
+    }
+
+    final napa = await makeEngine(
+      points: points,
+    ).answer('Top five NAPA', origin: origin);
+    expect(napa.result.places.single.id, 'napa');
+  });
+
   test('missing BP is explicit and labels Shell as an alternative', () async {
     final answer = await makeEngine(
       points: const [
@@ -270,6 +312,125 @@ void main() {
     expect(answer.result.status, QueryResultStatus.unavailable);
     expect(answer.text, contains('opening hours'));
   });
+
+  test('closest open restaurant skips a closer closed restaurant', () async {
+    const alwaysOpen = PlaceOpeningHours({
+      1: [OpeningInterval(0, 1440)],
+      2: [OpeningInterval(0, 1440)],
+      3: [OpeningInterval(0, 1440)],
+      4: [OpeningInterval(0, 1440)],
+      5: [OpeningInterval(0, 1440)],
+      6: [OpeningInterval(0, 1440)],
+      7: [OpeningInterval(0, 1440)],
+    });
+    const alwaysClosed = PlaceOpeningHours({});
+    final answer = await makeEngine(
+      points: const [
+        PointOfInterest(
+          id: 'closed-near',
+          regionId: 'r',
+          name: 'Closed Near Restaurant',
+          coordinates: Coordinates(35.0001, -90),
+          category: 'restaurant',
+          subcategory: 'restaurant',
+          address: '1 Near Street',
+          openingHours: alwaysClosed,
+        ),
+        PointOfInterest(
+          id: 'open-farther',
+          regionId: 'r',
+          name: 'Open Restaurant',
+          coordinates: Coordinates(35.01, -90),
+          category: 'restaurant',
+          subcategory: 'restaurant',
+          address: '2 Open Street',
+          openingHours: alwaysOpen,
+        ),
+      ],
+    ).answer('Where is the closest restaurant that is open?', origin: origin);
+    expect(answer.result.selectedPoi?.id, 'open-farther');
+  });
+
+  test(
+    'top open restaurants and branded restaurants filter independently',
+    () async {
+      const alwaysOpen = PlaceOpeningHours({
+        1: [OpeningInterval(0, 1440)],
+        2: [OpeningInterval(0, 1440)],
+        3: [OpeningInterval(0, 1440)],
+        4: [OpeningInterval(0, 1440)],
+        5: [OpeningInterval(0, 1440)],
+        6: [OpeningInterval(0, 1440)],
+        7: [OpeningInterval(0, 1440)],
+      });
+      const alwaysClosed = PlaceOpeningHours({});
+      final engine = makeEngine(
+        points: const [
+          PointOfInterest(
+            id: 'open-local',
+            regionId: 'r',
+            name: 'Open Local Restaurant',
+            coordinates: Coordinates(35.001, -90),
+            category: 'restaurant',
+            subcategory: 'restaurant',
+            address: '1 Local Street',
+            openingHours: alwaysOpen,
+          ),
+          PointOfInterest(
+            id: 'closed-local',
+            regionId: 'r',
+            name: 'Closed Local Restaurant',
+            coordinates: Coordinates(35.002, -90),
+            category: 'restaurant',
+            subcategory: 'restaurant',
+            address: '2 Local Street',
+            openingHours: alwaysClosed,
+          ),
+          PointOfInterest(
+            id: 'open-mcdonalds',
+            regionId: 'r',
+            name: "McDonald's",
+            coordinates: Coordinates(35.003, -90),
+            category: 'restaurant',
+            subcategory: 'fast_food',
+            address: '3 Burger Street',
+            openingHours: alwaysOpen,
+          ),
+          PointOfInterest(
+            id: 'closed-mcdonalds',
+            regionId: 'r',
+            name: "McDonald's",
+            coordinates: Coordinates(35.0001, -90),
+            category: 'restaurant',
+            subcategory: 'fast_food',
+            address: '4 Burger Street',
+            openingHours: alwaysClosed,
+          ),
+        ],
+      );
+
+      final restaurants = await engine.answer(
+        'Find me the top five restaurants that are open',
+        origin: origin,
+      );
+      expect(
+        restaurants.result.places.map((place) => place.id),
+        containsAll(['open-local', 'open-mcdonalds']),
+      );
+      expect(
+        restaurants.result.places.map((place) => place.id),
+        isNot(contains('closed-local')),
+      );
+
+      final branded = await engine.answer(
+        "Find me the top five McDonald's that are open",
+        origin: origin,
+      );
+      expect(branded.result.places.map((place) => place.id), [
+        'open-mcdonalds',
+      ]);
+    },
+  );
 
   test('map follow-up navigates to the exact previous BP result', () async {
     final engine = makeEngine(

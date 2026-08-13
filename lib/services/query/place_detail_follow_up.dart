@@ -15,6 +15,7 @@ class PlaceDetailFollowUpResolver {
 
   bool recognizes(String text) {
     final value = _normalize(text);
+    if (_startsNewPlaceSearch(value)) return false;
     return _asksClosing(value) ||
         _asksOpen(value) ||
         _asksPhone(value) ||
@@ -88,6 +89,8 @@ class PlaceDetailFollowUpResolver {
   bool _asksWebsite(String value) => RegExp(
     r'\b(open|show|visit).*(their|its|the)?\s*website\b',
   ).hasMatch(value);
+  bool _startsNewPlaceSearch(String value) =>
+      RegExp(r'\b(find|show|where|top|nearest|closest)\b').hasMatch(value);
 
   String _formatTime(DateTime value) {
     final hour = value.hour == 0

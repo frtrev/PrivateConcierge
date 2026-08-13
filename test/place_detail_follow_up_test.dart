@@ -64,4 +64,16 @@ void main() {
       contains('Find a place first'),
     );
   });
+
+  test('new open-place searches are not intercepted as follow-ups', () {
+    final resolver = PlaceDetailFollowUpResolver();
+    for (final phrase in [
+      'Find me the top five restaurants that are open',
+      "Find me the top five McDonald's that are open",
+      'Where is the closest restaurant that is open',
+    ]) {
+      expect(resolver.recognizes(phrase), isFalse, reason: phrase);
+    }
+    expect(resolver.recognizes('Are they open now?'), isTrue);
+  });
 }

@@ -118,6 +118,40 @@ void main() {
       expect(topThreeWords.placeQuery?.limit, 3);
     });
 
+    test('parses top searches with optional show/find prefixes', () {
+      for (final phrase in [
+        'Top 5 churches',
+        'Top five churches',
+        'Show me the top five churches',
+        'Find me the top five churches',
+      ]) {
+        final result = interpreter.interpret(phrase);
+        expect(result.intent, LocalQueryIntent.findPoi, reason: phrase);
+        expect(result.placeQuery?.category, 'church', reason: phrase);
+        expect(result.placeQuery?.searchTerm, isNull, reason: phrase);
+        expect(result.placeQuery?.limit, 5, reason: phrase);
+      }
+
+      for (final phrase in [
+        'Top five restaurants',
+        'Show me the top five restaurants',
+        'Find me the top five restaurants',
+      ]) {
+        final result = interpreter.interpret(phrase);
+        expect(result.placeQuery?.category, 'restaurant', reason: phrase);
+        expect(result.placeQuery?.searchTerm, isNull, reason: phrase);
+        expect(result.placeQuery?.limit, 5, reason: phrase);
+      }
+    });
+
+    test('recognizes NAPA in top and closest searches', () {
+      for (final phrase in ['Top five NAPA', 'Where is the closest NAPA']) {
+        final result = interpreter.interpret(phrase);
+        expect(result.placeQuery?.brand, 'NAPA Auto Parts', reason: phrase);
+      }
+      expect(interpreter.interpret('Top five NAPA').placeQuery?.limit, 5);
+    });
+
     test("parses closest BP", () {
       final result = interpreter.interpret("Where's the closest BP?");
       expect(result.intent, LocalQueryIntent.findPoi);
@@ -173,6 +207,34 @@ void main() {
       final openBp = interpreter.interpret("Find a BP that's open.");
       expect(openBp.placeQuery?.brand, 'BP');
       expect(openBp.placeQuery?.openNow, isTrue);
+    });
+
+    test('parses an open restaurant without inventing a search term', () {
+      final result = interpreter.interpret(
+        'Where is the closest restaurant that is open?',
+      );
+      expect(result.operation, QueryOperation.nearest);
+      expect(result.placeQuery?.category, 'restaurant');
+      expect(result.placeQuery?.searchTerm, isNull);
+      expect(result.placeQuery?.openNow, isTrue);
+      expect(result.placeQuery?.limit, 1);
+    });
+
+    test('parses top open-place searches as new structured queries', () {
+      final restaurants = interpreter.interpret(
+        'Find me the top five restaurants that are open',
+      );
+      expect(restaurants.placeQuery?.category, 'restaurant');
+      expect(restaurants.placeQuery?.searchTerm, isNull);
+      expect(restaurants.placeQuery?.openNow, isTrue);
+      expect(restaurants.placeQuery?.limit, 5);
+
+      final mcdonalds = interpreter.interpret(
+        "Find me the top five McDonald's that are open",
+      );
+      expect(mcdonalds.placeQuery?.brand, "McDonald's");
+      expect(mcdonalds.placeQuery?.openNow, isTrue);
+      expect(mcdonalds.placeQuery?.limit, 5);
     });
   });
 

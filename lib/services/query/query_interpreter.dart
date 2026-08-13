@@ -110,7 +110,7 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
     final limit =
         explicitLimit ?? (nearest || distanceQuestion || highestRated ? 1 : 5);
     final hasPlaceAction = RegExp(
-      r'\b(show|find|where|are there|what)\b',
+      r'\b(show|find|where|are there|what|top)\b',
     ).hasMatch(normalized);
     final possibleNamedTerm = brand == null && hasPlaceAction
         ? _genericSearchTerm(normalized)
@@ -197,7 +197,12 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
   }
 
   String? _genericSearchTerm(String text) {
-    var value = text;
+    var value = text.replaceAll(
+      RegExp(
+        r'\btop\s+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\b',
+      ),
+      ' ',
+    );
     const removable = <String>[
       'where is',
       "where's",
@@ -213,6 +218,10 @@ class RuleBasedQueryInterpreter implements QueryInterpreter {
       'nearby',
       'open now',
       'open',
+      'that is',
+      'that are',
+      "that's",
+      'which is',
       'please',
     ];
     for (final phrase in removable) {
