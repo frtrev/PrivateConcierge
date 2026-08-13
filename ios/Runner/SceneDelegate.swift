@@ -37,6 +37,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     )
   }
 
+  func templateApplicationScene(
+    _ templateApplicationScene: CPTemplateApplicationScene,
+    didDisconnectInterfaceController interfaceController: CPInterfaceController
+  ) {
+    CarPlaySessionCoordinator.shared.disconnect(interfaceController)
+  }
+
   private func microphoneButtonImage() -> UIImage {
     let size = CGSize(width: 120, height: 120)
     let renderer = UIGraphicsImageRenderer(size: size)
@@ -76,6 +83,11 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
 @available(iOS 14.0, *)
 final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
+  private struct PendingAlert {
+    let payload: [String: Any]
+    let queuedAt: Date
+  }
+
   static let shared = CarPlaySessionCoordinator()
   private weak var interfaceController: CPInterfaceController?
   private weak var carPlayScene: CPTemplateApplicationScene?
@@ -85,6 +97,9 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   private var listenAfterSpeech = false
   private var changingRootTemplate = false
   private var pendingRootTemplate: CPTemplate?
+  private var pendingAlerts: [PendingAlert] = []
+  private var presentingAlert = false
+  private let alertLifetime: TimeInterval = 5 * 60
 
   private override init() {
     super.init()
@@ -100,6 +115,15 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     self.carPlayScene = scene
     self.homeTemplate = homeTemplate
     if let latestPayload { show(payload: latestPayload) }
+    presentNextAlertIfPossible()
+  }
+
+  func disconnect(_ interfaceController: CPInterfaceController) {
+    guard self.interfaceController === interfaceController else { return }
+    self.interfaceController = nil
+    carPlayScene = nil
+    homeTemplate = nil
+    presentingAlert = false
   }
 
   func showListening() {
@@ -126,15 +150,66 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   }
 
   func showAlert(payload: [String: Any]) {
-    guard let interfaceController else { return }
-    let title = payload["title"] as? String ?? "Charon"
-    let body = payload["body"] as? String ?? ""
-    let dismiss = CPAlertAction(title: "Dismiss", style: .default) { _ in
-      interfaceController.dismissTemplate(animated: true, completion: nil)
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.pendingAlerts.append(PendingAlert(payload: payload, queuedAt: Date()))
+      if self.pendingAlerts.count > 5 {
+        self.pendingAlerts.removeFirst(self.pendingAlerts.count - 5)
+      }
+      self.presentNextAlertIfPossible()
+    }
+  }
+
+  private func presentNextAlertIfPossible() {
+    guard !presentingAlert, let interfaceController else { return }
+    let now = Date()
+    pendingAlerts.removeAll { now.timeIntervalSince($0.queuedAt) > alertLifetime }
+    guard !pendingAlerts.isEmpty else { return }
+    let alertPayload = pendingAlerts.removeFirst().payload
+    presentingAlert = true
+    let title = alertPayload["title"] as? String ?? "Charon"
+    let body = alertPayload["body"] as? String ?? ""
+    let dismiss = CPAlertAction(title: "Dismiss", style: .default) { [weak self] _ in
+      guard let self else { return }
+      interfaceController.dismissTemplate(animated: true) { [weak self] _, _ in
+        guard let self else { return }
+        self.presentingAlert = false
+        self.presentNextAlertIfPossible()
+      }
     }
     let message = body.isEmpty ? title : "\(title)\n\(body)"
     let alert = CPAlertTemplate(titleVariants: [message], actions: [dismiss])
-    interfaceController.presentTemplate(alert, animated: true, completion: nil)
+    interfaceController.presentTemplate(alert, animated: true) { [weak self] presented, error in
+      guard let self else { return }
+      if !presented || error != nil {
+        self.presentingAlert = false
+        self.showAlertAsList(title: title, body: body)
+      }
+    }
+  }
+
+  private func showAlertAsList(title: String, body: String) {
+    guard let interfaceController else { return }
+    let message = CPListItem(text: title, detailText: body)
+    message.handler = { _, completion in completion() }
+    let dismiss = CPListItem(text: "Dismiss", detailText: nil)
+    dismiss.handler = { [weak self] _, completion in
+      guard let self else {
+        completion()
+        return
+      }
+      self.presentingAlert = false
+      self.showHome()
+      completion()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        self?.presentNextAlertIfPossible()
+      }
+    }
+    let template = CPListTemplate(
+      title: "Private Concierge",
+      sections: [CPListSection(items: [message, dismiss])]
+    )
+    setRootTemplate(template, animated: true)
   }
 
   func showStatus(payload: [String: Any]) {
