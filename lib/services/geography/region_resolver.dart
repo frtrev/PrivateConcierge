@@ -31,10 +31,9 @@ class DeviceAreaLabelResolver implements AreaLabelResolver {
   @override
   Future<AreaLabel> label(Coordinates coordinates) async {
     try {
-      final values = await _geocoding.placemarkFromCoordinates(
-        coordinates.latitude,
-        coordinates.longitude,
-      );
+      final values = await _geocoding
+          .placemarkFromCoordinates(coordinates.latitude, coordinates.longitude)
+          .timeout(const Duration(seconds: 8));
       final place = values.first;
       final city = _firstNonEmpty([
         place.locality,

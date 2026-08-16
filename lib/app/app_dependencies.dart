@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 import '../database/sqlite_poi_repository.dart';
 import '../features/loading/bootstrap_service.dart';
 import '../services/commands/command_interpreter.dart';
@@ -28,6 +29,9 @@ import '../services/visits/visit_tracker.dart';
 import '../services/tracking/tracking_query_engine.dart';
 import '../core/models/geo.dart';
 import 'app_theme_controller.dart';
+import '../services/local_ai/development_local_ai_service.dart';
+import '../services/local_ai/local_ai_coordinator.dart';
+import '../services/local_ai/model_manifest.dart';
 
 class AppDependencies {
   AppDependencies._({
@@ -45,6 +49,7 @@ class AppDependencies {
     required this.navigation,
     required this.assistant,
     required this.speechVoices,
+    required this.localAi,
   });
   final BootstrapService bootstrap;
   final RegionPackageManager packages;
@@ -60,8 +65,22 @@ class AppDependencies {
   final NavigationService navigation;
   final AssistantEngine assistant;
   final SpeechVoiceService speechVoices;
+  final DevelopmentLocalAiService localAi;
   static Future<AppDependencies> create() async {
     final preferences = await SharedPreferences.getInstance();
+    const configuredManifest = String.fromEnvironment(
+      'CHARON_LOCAL_AI_MANIFEST_JSON',
+    );
+    final localAi = DevelopmentLocalAiService(
+      preferences,
+      ModelManifest.decode(
+        configuredManifest.isNotEmpty
+            ? configuredManifest
+            : await rootBundle.loadString(
+                'assets/local_ai/development_manifest.json',
+              ),
+      ),
+    );
     final poi = SqlitePoiRepository();
     final privateData = SqlitePrivateDataStore();
     const useMockLocation = bool.fromEnvironment('USE_MOCK_LOCATION');
@@ -129,6 +148,7 @@ class AppDependencies {
       nearby: nearby,
       profiles: profiles,
       tracking: TrackingQueryEngine(privateData),
+      localAi: LocalAiCoordinator(localAi),
     );
     return AppDependencies._(
       packages: packages,
@@ -151,6 +171,7 @@ class AppDependencies {
       assistant: assistant,
       speechVoices: const SpeechVoiceService(),
       bootstrap: bootstrap,
+      localAi: localAi,
     );
   }
 }

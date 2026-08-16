@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "modelId": "charon-qwen3-0.6b",
+  "modelVersion": "q4-k-m-60b85c0",
+  "displayName": "Qwen3 0.6B Q4_K_M",
+  "format": "gguf",
+  "quantization": "Q4_K_M",
+  "downloadUrl": "https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/60b85c0e3d8fe0f6474f406922a26d12aca4550d/Qwen_Qwen3-0.6B-Q4_K_M.gguf?download=true",
+  "downloadSizeBytes": 484220320,
+  "installedSizeBytes": 484220320,
+  "minimumMemoryBytes": 2147483648,
+  "minimumAndroidSdk": 28,
+  "minimumIosVersion": "13.0",
+  "sha256": "9acfc1e001311f34b4252001b626f2e466d592a42065f66571bff3790d4e1b14",
+  "signature": "",
+  "licenseUrl": "https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE",
+  "privacyPolicyUrl": "https://huggingface.co/privacy",
+  "developmentOnly": false
+}

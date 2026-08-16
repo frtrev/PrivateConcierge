@@ -4,11 +4,14 @@ import android.Manifest
 import android.content.Intent
 import android.content.Context
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.RecognitionService
@@ -47,6 +50,29 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "charon/local_ai").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkCompatibility" -> {
+                    val minimumSdk = call.argument<Int>("minimumAndroidSdk") ?: 24
+                    val compatible = Build.VERSION.SDK_INT >= minimumSdk
+                    result.success(mapOf(
+                        "compatible" to compatible,
+                        "message" to if (compatible) "Compatible with the on-device GGUF runtime." else "Requires Android API $minimumSdk or newer."
+                    ))
+                }
+                "downloadEnvironment" -> {
+                    val connectivity = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                    val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+                    val unmetered = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+                    result.success(mapOf(
+                        "unmetered" to unmetered,
+                        "availableStorageBytes" to StatFs(filesDir.path).availableBytes
+                    ))
+                }
+                "dispose", "cancel" -> result.success(null)
+                else -> result.notImplemented()
+            }
+        }
         carChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "charon/car").also { channel ->
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {

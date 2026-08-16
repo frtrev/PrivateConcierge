@@ -45,6 +45,17 @@ void main() {
     expect(serializedPlace['website'], 'https://example.com');
     expect(serializedPlace['openingHours'], isNotNull);
     expect((payload['actions']! as List), hasLength(2));
+    expect(payload['usedLocalAi'], isFalse);
+  });
+
+  test('serializes the local AI response indicator', () {
+    const result = AssistantResult(
+      response: '4',
+      spokenResponse: '4',
+      type: AssistantResultType.message,
+      usedLocalAi: true,
+    );
+    expect(result.toMap()['usedLocalAi'], isTrue);
   });
 
   test('vehicle place-list summary reports count and ten-place cap', () {

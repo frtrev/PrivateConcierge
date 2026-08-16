@@ -124,6 +124,7 @@ class AssistantResult {
     this.places = const [],
     this.actions = const [],
     this.context = const AssistantConversationState(),
+    this.usedLocalAi = false,
   });
 
   final String response;
@@ -132,6 +133,7 @@ class AssistantResult {
   final List<PlaceResult> places;
   final List<AssistantAction> actions;
   final AssistantConversationState context;
+  final bool usedLocalAi;
 
   PlaceResult? get selectedPlace {
     final selectedId = context.selectedPlaceId;
@@ -150,6 +152,7 @@ class AssistantResult {
     'places': places.map((place) => place.toMap()).toList(growable: false),
     'actions': actions.map((action) => action.toMap()).toList(growable: false),
     'context': context.toMap(),
+    'usedLocalAi': usedLocalAi,
   };
 }
 

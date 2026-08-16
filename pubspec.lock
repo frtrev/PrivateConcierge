@@ -85,10 +85,10 @@ packages:
     dependency: transitive
     description:
       name: code_assets
-      sha256: bf394f466ba9205f1812a0433b392d6af280f155f56651eda7c18cc32ed493b8
+      sha256: "83ccdaa064c980b5596c35dd64a8d3ecc68620174ab9b90b6343b753aa721687"
       url: "https://pub.dev"
     source: hosted
-    version: "1.2.1"
+    version: "1.0.0"
   code_builder:
     dependency: transitive
     description:
@@ -114,7 +114,7 @@ packages:
     source: hosted
     version: "3.1.2"
   crypto:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
@@ -372,10 +372,10 @@ packages:
     dependency: transitive
     description:
       name: hooks
-      sha256: "9a62a50b50b769a737bc0a8ff381f333529df3ab746b2f6b02e83760231455ba"
+      sha256: "025f060e86d2d4c3c47b56e33caf7f93bf9283340f26d23424ebcfccf34f621e"
       url: "https://pub.dev"
     source: hosted
-    version: "2.0.2"
+    version: "1.0.3"
   http:
     dependency: "direct main"
     description:
@@ -456,6 +456,78 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.2"
+  lib_llama_cpp:
+    dependency: "direct main"
+    description:
+      name: lib_llama_cpp
+      sha256: "94cb9dd4cae4e3138be5fb4a666b565f9030d4d053298520628290dcbdf277c6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_android:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_android
+      sha256: "2f3f8c185df3eb4ac8e1634706b293f7cf96ea25c97ef43c9f1642d7111d9ba7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_ffi:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_ffi
+      sha256: "75352b6b23416150f8c57e4259b053cc704e406c4627beb1d1fd216d1de90c4c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_ios:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_ios
+      sha256: f159c87e864e8c5199d4966cc690b29d451e2461d94cea13f1e66ab274205dcc
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_linux:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_linux
+      sha256: f427d653742c2b1d8b38247d4fece8d4cea7e46024b18c271e914e4b4e8c5eef
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_macos:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_macos
+      sha256: e70100333ce0c573117187e95dbcd2dc0bae122a5aaa37919b971086e8ac94f6
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_platform_interface:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_platform_interface
+      sha256: "34347118906c7065aa9ac93746dfc60d61b88aa31cb23c6764dde810b7f1e1e6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_server:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_server
+      sha256: "082b5e658a7dbca42331ddabe81140da1208f8157528b34f24a56f16b51d5aa1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  lib_llama_cpp_windows:
+    dependency: transitive
+    description:
+      name: lib_llama_cpp_windows
+      sha256: cd7250985c38d973e635e8e6c7559c9fd1c72334d44d54d453e28cd7b3e915e6
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
   lints:
     dependency: transitive
     description:
@@ -496,14 +568,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.0"
+  native_toolchain_c:
+    dependency: transitive
+    description:
+      name: native_toolchain_c
+      sha256: "6ba77bb18063eebe9de401f5e6437e95e1438af0a87a3a39084fbd37c90df572"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.17.6"
   objective_c:
     dependency: transitive
     description:
       name: objective_c
-      sha256: b7fb95a6d9a4f009edd63dc5ac69f07420b23a16161c6dd8660290b59c602e8e
+      sha256: "100a1c87616ab6ed41ec263b083c0ef3261ee6cd1dc3b0f35f8ddfa4f996fe52"
       url: "https://pub.dev"
     source: hosted
-    version: "9.5.0"
+    version: "9.3.0"
   package_config:
     dependency: transitive
     description:

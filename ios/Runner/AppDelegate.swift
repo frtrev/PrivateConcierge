@@ -3,6 +3,7 @@ import AVFoundation
 import CoreLocation
 import Speech
 import UIKit
+import Network
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
@@ -35,6 +36,36 @@ import UIKit
     guard let registrar = engineBridge.pluginRegistry.registrar(
       forPlugin: "IosOnDeviceSpeech"
     ) else { return }
+    let localAiChannel = FlutterMethodChannel(
+      name: "charon/local_ai",
+      binaryMessenger: registrar.messenger()
+    )
+    localAiChannel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "checkCompatibility":
+        result([
+          "compatible": true,
+          "message": "Compatible with the on-device GGUF runtime."
+        ])
+      case "downloadEnvironment":
+        let values = try? FileManager.default.attributesOfFileSystem(
+          forPath: NSHomeDirectory()
+        )
+        let available = (values?[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
+        let monitor = NWPathMonitor()
+        let queue = DispatchQueue(label: "charon.local-ai.network")
+        monitor.pathUpdateHandler = { path in
+          monitor.cancel()
+          result([
+            "unmetered": path.status == .satisfied && !path.isExpensive,
+            "availableStorageBytes": available
+          ])
+        }
+        monitor.start(queue: queue)
+      case "dispose", "cancel": result(nil)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
     carChannel = FlutterMethodChannel(
       name: "charon/car",
       binaryMessenger: registrar.messenger()

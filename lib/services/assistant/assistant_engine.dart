@@ -12,6 +12,7 @@ import '../../services/profile/user_profile_service.dart';
 import '../../services/query/local_query_engine.dart';
 import '../../services/query/place_detail_follow_up.dart';
 import '../../services/tracking/tracking_query_engine.dart';
+import '../../services/local_ai/local_ai_coordinator.dart';
 
 class AssistantEngine {
   AssistantEngine({
@@ -23,6 +24,7 @@ class AssistantEngine {
     required this.profiles,
     required this.tracking,
     PlaceDetailFollowUpResolver? placeDetails,
+    this.localAi,
   }) : placeDetails = placeDetails ?? PlaceDetailFollowUpResolver();
 
   final LocalQueryEngine queries;
@@ -33,11 +35,12 @@ class AssistantEngine {
   final UserProfileService profiles;
   final PlaceDetailFollowUpResolver placeDetails;
   final TrackingQueryEngine tracking;
+  final LocalAiCoordinator? localAi;
 
   Future<AssistantResult> answer(String text) async {
     final normalized = text
         .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z ]'), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9 .?+\-*/]'), ' ')
         .trim();
     if (RegExp(r'^(no|no thanks|not now|cancel)$').hasMatch(normalized) &&
         queries.context.current?.selectedPoi != null) {
@@ -52,9 +55,59 @@ class AssistantEngine {
     if (trackingAnswer != null) return _personalizeResult(trackingAnswer);
     final detailAnswer = _placeDetailFollowUp(text);
     if (detailAnswer != null) return detailAnswer;
-    final answer = await queries.answer(text, origin: bootstrap.coordinates);
+    if (_looksLikeGeneralQuestion(normalized)) {
+      final generalAnswer = await localAi?.answerGeneral(normalized);
+      if (generalAnswer != null) {
+        return AssistantResult(
+          response: generalAnswer,
+          spokenResponse: generalAnswer,
+          type: AssistantResultType.message,
+          context: const AssistantConversationState(
+            lastIntent: 'localAiGeneralAnswer',
+          ),
+          usedLocalAi: true,
+        );
+      }
+    }
+    var enhancedText = text;
+    final localResult = await localAi?.interpret(normalized);
+    if (localResult != null) {
+      if (localResult.confidence < .75 &&
+          localResult.clarificationQuestion != null) {
+        return AssistantResult(
+          response: localResult.clarificationQuestion!,
+          spokenResponse: localResult.clarificationQuestion!,
+          type: AssistantResultType.message,
+          context: const AssistantConversationState(
+            lastIntent: 'localAiClarification',
+          ),
+        );
+      }
+      if (localResult.intent == 'searchNearby') {
+        final category = localResult.arguments['category'] as String?;
+        enhancedText = category == null
+            ? 'find nearby'
+            : 'find nearby $category';
+      }
+      if (localResult.intent == 'answerGeneral') {
+        final answer = localResult.arguments['answer'] as String;
+        return AssistantResult(
+          response: answer,
+          spokenResponse: answer,
+          type: AssistantResultType.message,
+          context: const AssistantConversationState(
+            lastIntent: 'localAiGeneralAnswer',
+          ),
+          usedLocalAi: true,
+        );
+      }
+    }
+    final answer = await queries.answer(
+      enhancedText,
+      origin: bootstrap.coordinates,
+    );
     if (answer.plan.intent != LocalQueryIntent.unknown) {
-      return _fromQuery(answer);
+      return _fromQuery(answer, usedLocalAi: localResult != null);
     }
     return _fromCommand(text);
   }
@@ -68,6 +121,7 @@ class AssistantEngine {
       places: result.places,
       actions: result.actions,
       context: result.context,
+      usedLocalAi: result.usedLocalAi,
     );
   }
 
@@ -113,7 +167,7 @@ distance=${place.distanceMeters == null ? 'unavailable' : 'calculated locally'}
 ''');
   }
 
-  AssistantResult _fromQuery(QueryAnswer answer) {
+  AssistantResult _fromQuery(QueryAnswer answer, {bool usedLocalAi = false}) {
     final result = answer.result;
     final selected = result.selectedPoi ?? result.alternativePoi;
     final pois = result.places.isNotEmpty
@@ -171,6 +225,7 @@ distance=${place.distanceMeters == null ? 'unavailable' : 'calculated locally'}
         lastBrand: answer.plan.placeQuery?.brand,
         selectedPlaceId: selected?.id,
       ),
+      usedLocalAi: usedLocalAi,
     );
   }
 
@@ -253,6 +308,21 @@ distance=${place.distanceMeters == null ? 'unavailable' : 'calculated locally'}
 
   String _describe(List<PointOfInterest> points) =>
       'Nearby: ${points.take(3).map((point) => '${point.name}, ${(point.distanceMeters! / 1609.344).toStringAsFixed(1)} miles').join('; ')}.';
+
+  bool _looksLikeGeneralQuestion(String text) {
+    final placeLanguage = RegExp(
+      r'\b(near|nearby|nearest|closest|place|places|restaurant|store|shop|gas|pharmacy|church|navigate|directions|map|open now)\b',
+    );
+    if (placeLanguage.hasMatch(text)) return false;
+    if (RegExp(
+      r'\d\s*(\+|-|\*|/|times|plus|minus|divided)\s*\d',
+    ).hasMatch(text)) {
+      return true;
+    }
+    return RegExp(
+      r'^(who|what|why|how|when|tell me|explain|define|calculate)\b',
+    ).hasMatch(text);
+  }
 }
 
 String vehiclePlaceListSummary(QueryAnswer answer) {

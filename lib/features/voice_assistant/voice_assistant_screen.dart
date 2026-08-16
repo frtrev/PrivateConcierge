@@ -247,12 +247,31 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Card(
+                    color: assistantResult?.usedLocalAi == true
+                        ? Theme.of(context).colorScheme.tertiaryContainer
+                        : null,
+                    shape: assistantResult?.usedLocalAi == true
+                        ? RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(
+                              color: Theme.of(context).colorScheme.tertiary,
+                              width: 2,
+                            ),
+                          )
+                        : null,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(response),
+                          if (assistantResult?.usedLocalAi == true) ...[
+                            const SizedBox(height: 10),
+                            const Chip(
+                              avatar: Icon(Icons.smart_toy, size: 18),
+                              label: Text('Qwen Local AI response'),
+                            ),
+                          ],
                           if (assistantResult?.places.isNotEmpty == true) ...[
                             const SizedBox(height: 12),
                             for (final place in assistantResult!.places)

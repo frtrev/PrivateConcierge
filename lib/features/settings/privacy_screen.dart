@@ -4,6 +4,8 @@ import '../../services/storage/private_data_store.dart';
 import '../../services/profile/user_profile_service.dart';
 import '../../services/voice/speech_voice_service.dart';
 import '../onboarding/profile_onboarding_screen.dart';
+import '../../services/local_ai/development_local_ai_service.dart';
+import 'local_ai_settings.dart';
 
 class PrivacyScreen extends StatelessWidget {
   const PrivacyScreen({
@@ -11,16 +13,20 @@ class PrivacyScreen extends StatelessWidget {
     required this.privateData,
     required this.profileService,
     required this.speechVoices,
+    required this.localAi,
   });
   final PrivateDataStore privateData;
   final UserProfileService profileService;
   final SpeechVoiceService speechVoices;
+  final DevelopmentLocalAiService localAi;
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Settings')),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        LocalAiSettingsSection(service: localAi),
+        const SizedBox(height: 12),
         ListTile(
           leading: const Icon(Icons.record_voice_over_outlined),
           title: const Text('Assistant profile and voice'),
