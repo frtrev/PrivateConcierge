@@ -58,6 +58,18 @@ void main() {
     expect(result.toMap()['usedLocalAi'], isTrue);
   });
 
+  test('serializes tappable prayer choices', () {
+    const result = AssistantResult(
+      response: 'Choose a prayer',
+      spokenResponse: 'Choose a prayer',
+      type: AssistantResultType.message,
+      prayerChoices: [PrayerChoice(id: 7, name: 'Morning')],
+    );
+    expect(result.toMap()['prayerChoices'], [
+      {'id': 7, 'name': 'Morning'},
+    ]);
+  });
+
   test('vehicle place-list summary reports count and ten-place cap', () {
     QueryAnswer answer({required int requested, required int found}) =>
         QueryAnswer(

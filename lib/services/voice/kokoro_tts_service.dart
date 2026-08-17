@@ -88,43 +88,60 @@ class KokoroTtsService {
     }
     final base = await _baseDirectory()
       ..createSync(recursive: true);
-    final archiveFile = File(
+    final partialFile = File(
       path.join(base.path, '$modelVersion.tar.bz2.part'),
     );
+    final archiveFile = File(path.join(base.path, '$modelVersion.tar.bz2'));
     final staging = Directory(
       path.join(base.path, '.installing-$modelVersion'),
     );
+    var phase = 'download';
     try {
       status.value = const KokoroStatus(state: KokoroInstallState.downloading);
-      _client = HttpClient();
-      final request = await _client!.getUrl(Uri.parse(downloadUrl));
-      final response = await request.close();
-      if (response.statusCode != HttpStatus.ok) {
-        throw HttpException(
-          'Download failed with HTTP ${response.statusCode}.',
-        );
+      var downloadFile = archiveFile.existsSync() ? archiveFile : partialFile;
+      var received = downloadFile.existsSync() ? downloadFile.lengthSync() : 0;
+      var total = downloadBytes;
+      var actual = received == downloadBytes
+          ? (await sha256.bind(downloadFile.openRead()).first).toString()
+          : '';
+      if (actual != sha256Digest) {
+        downloadFile = partialFile;
+        _client = HttpClient();
+        final request = await _client!.getUrl(Uri.parse(downloadUrl));
+        final response = await request.close();
+        if (response.statusCode != HttpStatus.ok) {
+          throw HttpException(
+            'Download failed with HTTP ${response.statusCode}.',
+          );
+        }
+        total = response.contentLength > 0
+            ? response.contentLength
+            : downloadBytes;
+        final sink = partialFile.openWrite();
+        received = 0;
+        await for (final chunk in response) {
+          sink.add(chunk);
+          received += chunk.length;
+          status.value = KokoroStatus(
+            state: KokoroInstallState.downloading,
+            downloadedBytes: received,
+            totalBytes: total,
+          );
+        }
+        await sink.close();
+        actual = (await sha256.bind(partialFile.openRead()).first).toString();
       }
-      final total = response.contentLength > 0
-          ? response.contentLength
-          : downloadBytes;
-      final sink = archiveFile.openWrite();
-      var received = 0;
-      await for (final chunk in response) {
-        sink.add(chunk);
-        received += chunk.length;
-        status.value = KokoroStatus(
-          state: KokoroInstallState.downloading,
-          downloadedBytes: received,
-          totalBytes: total,
-        );
-      }
-      await sink.close();
-      final actual = (await sha256.bind(archiveFile.openRead()).first)
-          .toString();
       if (actual != sha256Digest) {
         throw const FormatException(
           'Downloaded Kokoro package checksum failed.',
         );
+      }
+
+      // archive selects the decoder from the filename. Keep `.part` only while
+      // downloading, then expose the verified package with its real extension.
+      if (downloadFile.path != archiveFile.path) {
+        if (archiveFile.existsSync()) archiveFile.deleteSync();
+        partialFile.renameSync(archiveFile.path);
       }
 
       status.value = KokoroStatus(
@@ -134,9 +151,13 @@ class KokoroTtsService {
       );
       if (staging.existsSync()) staging.deleteSync(recursive: true);
       staging.createSync(recursive: true);
-      await Isolate.run(
-        () => extractFileToDisk(archiveFile.path, staging.path),
-      );
+      phase = 'extraction';
+      final archivePath = archiveFile.path;
+      final stagingPath = staging.path;
+      await Isolate.run(() async {
+        await extractFileToDisk(archivePath, stagingPath);
+      });
+      phase = 'verification';
       final extracted = Directory(path.join(staging.path, modelVersion));
       if (!extracted.existsSync()) {
         throw const FormatException('Kokoro package contents were incomplete.');
@@ -150,10 +171,11 @@ class KokoroTtsService {
         throw const FormatException('Kokoro installation verification failed.');
       }
       status.value = const KokoroStatus(state: KokoroInstallState.ready);
-    } catch (error) {
+    } catch (error, stack) {
+      debugPrint('Kokoro $phase failed: $error\n$stack');
       status.value = KokoroStatus(
         state: KokoroInstallState.failed,
-        error: _friendlyError(error),
+        error: _friendlyError(error, phase),
       );
       rethrow;
     } finally {
@@ -164,26 +186,57 @@ class KokoroTtsService {
 
   Future<void> speak(String text, KokoroVoice voice, {bool wait = true}) {
     final completer = Completer<void>();
-    _queue = _queue.then((_) async {
+    _queue = _queue.catchError((Object _) {}).then((_) async {
+      File? wavFile;
       try {
         if (!await _hasRequiredFiles()) {
           throw StateError('Download Kokoro before selecting this voice.');
         }
         final root = await _modelDirectory();
-        final bytes = await Isolate.run(
-          () => _synthesizeWav(root.path, text, voice.sid),
+        final rootPath = root.path;
+        final speechText = text;
+        final speakerId = voice.sid;
+        final bytes = await _synthesizeInBackground(
+          rootPath,
+          speechText,
+          speakerId,
         );
+        final temporary = await getTemporaryDirectory();
+        wavFile = File(
+          path.join(
+            temporary.path,
+            'kokoro-${DateTime.now().microsecondsSinceEpoch}.wav',
+          ),
+        );
+        await wavFile.writeAsBytes(bytes, flush: true);
         await _player.stop();
         final finished = _player.onPlayerComplete.first;
-        await _player.play(BytesSource(bytes, mimeType: 'audio/wav'));
-        if (wait) await finished;
+        await _player.play(DeviceFileSource(wavFile.path));
+        if (wait) {
+          await finished;
+          if (wavFile.existsSync()) wavFile.deleteSync();
+        } else {
+          unawaited(
+            finished.whenComplete(() {
+              if (wavFile?.existsSync() ?? false) wavFile!.deleteSync();
+            }),
+          );
+        }
         completer.complete();
       } catch (error, stack) {
+        debugPrint('Kokoro speech failed: $error\n$stack');
+        if (wavFile?.existsSync() ?? false) wavFile!.deleteSync();
         completer.completeError(error, stack);
       }
     });
     return completer.future;
   }
+
+  static Future<Uint8List> _synthesizeInBackground(
+    String root,
+    String text,
+    int sid,
+  ) => Isolate.run(() => _synthesizeWav(root, text, sid));
 
   static Uint8List _synthesizeWav(String root, String text, int sid) {
     sherpa.initBindings();
@@ -246,10 +299,10 @@ class KokoroTtsService {
     return bytes.buffer.asUint8List();
   }
 
-  String _friendlyError(Object error) {
+  String _friendlyError(Object error, String phase) {
     if (error is SocketException) return 'Could not connect to the model host.';
     if (error is HttpException || error is FormatException) return '$error';
-    return 'Kokoro installation failed. Please try again.';
+    return 'Kokoro $phase failed: $error';
   }
 
   Future<void> dispose() async {

@@ -21,10 +21,12 @@ class VoiceAssistantScreen extends StatefulWidget {
     required this.dependencies,
     this.autoStart = false,
     this.controller,
+    this.initialPrompt,
   });
   final AppDependencies dependencies;
   final bool autoStart;
   final VoiceAssistantController? controller;
+  final String? initialPrompt;
   @override
   State<VoiceAssistantScreen> createState() => _VoiceAssistantScreenState();
 }
@@ -45,8 +47,15 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   void initState() {
     super.initState();
     widget.controller?.attach(_requestListening);
-    if (widget.autoStart) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _listen());
+    final initialPrompt = widget.initialPrompt;
+    if (initialPrompt != null) response = initialPrompt;
+    if (widget.autoStart || initialPrompt != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (initialPrompt != null) {
+          await widget.dependencies.speechVoices.speak(initialPrompt);
+        }
+        if (mounted) await _listen();
+      });
     }
   }
 
@@ -195,6 +204,13 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     }
   }
 
+  Future<void> _playPrayer(int id) async {
+    final prayers = await widget.dependencies.prayers.prayers();
+    final matches = prayers.where((prayer) => prayer.id == id);
+    if (matches.isEmpty) return;
+    await widget.dependencies.speechVoices.speak(matches.first.text);
+  }
+
   String _placeDetail(PlaceResult place) {
     final details = <String>[];
     final meters = place.distanceMeters;
@@ -271,6 +287,19 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
                               avatar: Icon(Icons.smart_toy, size: 18),
                               label: Text('Qwen Local AI response'),
                             ),
+                          ],
+                          if (assistantResult?.prayerChoices.isNotEmpty ==
+                              true) ...[
+                            const SizedBox(height: 12),
+                            for (final prayer in assistantResult!.prayerChoices)
+                              Card.outlined(
+                                child: ListTile(
+                                  leading: const Icon(Icons.self_improvement),
+                                  title: Text(prayer.name),
+                                  trailing: const Icon(Icons.play_arrow),
+                                  onTap: () => _playPrayer(prayer.id),
+                                ),
+                              ),
                           ],
                           if (assistantResult?.places.isNotEmpty == true) ...[
                             const SizedBox(height: 12),

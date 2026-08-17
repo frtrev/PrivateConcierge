@@ -9,6 +9,21 @@ import '../../core/models/unknown_place_candidate.dart';
 import '../../core/models/visit_session.dart';
 import '../../core/models/visit_diagnostic.dart';
 import '../../core/models/parking_event.dart';
+import '../../core/models/prayer.dart';
+
+abstract interface class PrayerStore {
+  Future<Prayer> savePrayer({String? name, required String text, int? id});
+  Future<List<Prayer>> prayers();
+  Future<void> renamePrayer(int id, String name);
+  Future<void> deletePrayer(int id);
+  Future<List<PrayerRoutine>> prayerRoutines();
+  Future<PrayerRoutine> savePrayerRoutine({
+    int? id,
+    required String name,
+    required List<int> prayerIds,
+  });
+  Future<void> deletePrayerRoutine(int id);
+}
 
 abstract interface class VisitDiagnosticStore {
   Future<void> recordVisitDiagnostic(String event, String detail, DateTime at);
@@ -48,14 +63,15 @@ abstract interface class PrivateDataStore {
   Future<void> deleteParkingEvents();
 }
 
-class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
+class SqlitePrivateDataStore
+    implements PrivateDataStore, VisitDiagnosticStore, PrayerStore {
   Database? _database;
   @override
   Future<void> open() async {
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 9,
+      version: 10,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -66,6 +82,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
         await _createVisitSessionsTable(db);
         await _createVisitDiagnosticsTable(db);
         await _createParkingEventsTable(db);
+        await _createPrayerTables(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createVisitsTable(db);
@@ -82,6 +99,7 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
           );
         }
         if (oldVersion < 9) await _createParkingEventsTable(db);
+        if (oldVersion < 10) await _createPrayerTables(db);
       },
     );
   }
@@ -293,6 +311,9 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
     await _database?.delete('visit_sessions');
     await deleteParkingEvents();
     await clearVisitDiagnostics();
+    await _database?.delete('prayer_routine_items');
+    await _database?.delete('prayer_routines');
+    await _database?.delete('prayers');
   }
 
   @override
@@ -540,6 +561,161 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
     await _database?.delete('parking_events');
   }
 
+  @override
+  Future<Prayer> savePrayer({
+    String? name,
+    required String text,
+    int? id,
+  }) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (id == null) {
+      final newId = await db.insert('prayers', {
+        'name': name!.trim(),
+        'text': text.trim(),
+        'created_ms': now,
+        'updated_ms': now,
+      });
+      return Prayer(
+        id: newId,
+        name: name.trim(),
+        text: text.trim(),
+        createdAt: DateTime.fromMillisecondsSinceEpoch(now),
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(now),
+      );
+    }
+    await db.update(
+      'prayers',
+      {'text': text.trim(), 'updated_ms': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return (await prayers()).firstWhere((prayer) => prayer.id == id);
+  }
+
+  @override
+  Future<List<Prayer>> prayers() async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final rows = await db.query('prayers', orderBy: 'name COLLATE NOCASE');
+    return rows.map(_prayerFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<void> renamePrayer(int id, String name) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.update(
+      'prayers',
+      {
+        'name': name.trim(),
+        'updated_ms': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  @override
+  Future<void> deletePrayer(int id) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.transaction((txn) async {
+      await txn.delete(
+        'prayer_routine_items',
+        where: 'prayer_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('prayers', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  @override
+  Future<List<PrayerRoutine>> prayerRoutines() async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final routines = await db.query(
+      'prayer_routines',
+      orderBy: 'name COLLATE NOCASE',
+    );
+    final allPrayers = {
+      for (final prayer in await prayers()) prayer.id: prayer,
+    };
+    final result = <PrayerRoutine>[];
+    for (final row in routines) {
+      final items = await db.query(
+        'prayer_routine_items',
+        where: 'routine_id = ?',
+        whereArgs: [row['id']],
+        orderBy: 'position',
+      );
+      result.add(
+        PrayerRoutine(
+          id: row['id']! as int,
+          name: row['name']! as String,
+          prayers: items
+              .map((item) => allPrayers[item['prayer_id']! as int])
+              .whereType<Prayer>()
+              .toList(growable: false),
+          createdAt: DateTime.fromMillisecondsSinceEpoch(
+            row['created_ms']! as int,
+          ),
+        ),
+      );
+    }
+    return result;
+  }
+
+  @override
+  Future<PrayerRoutine> savePrayerRoutine({
+    int? id,
+    required String name,
+    required List<int> prayerIds,
+  }) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    late int routineId;
+    await db.transaction((txn) async {
+      if (id == null) {
+        routineId = await txn.insert('prayer_routines', {
+          'name': name.trim(),
+          'created_ms': DateTime.now().millisecondsSinceEpoch,
+        });
+      } else {
+        routineId = id;
+        await txn.update(
+          'prayer_routines',
+          {'name': name.trim()},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        await txn.delete(
+          'prayer_routine_items',
+          where: 'routine_id = ?',
+          whereArgs: [id],
+        );
+      }
+      for (var index = 0; index < prayerIds.length; index++) {
+        await txn.insert('prayer_routine_items', {
+          'routine_id': routineId,
+          'prayer_id': prayerIds[index],
+          'position': index,
+        });
+      }
+    });
+    return (await prayerRoutines()).firstWhere(
+      (routine) => routine.id == routineId,
+    );
+  }
+
+  @override
+  Future<void> deletePrayerRoutine(int id) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    await db.transaction((txn) async {
+      await txn.delete(
+        'prayer_routine_items',
+        where: 'routine_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('prayer_routines', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
   static Future<void> _createVisitsTable(Database db) => db.execute(
     'CREATE TABLE visited_places (poi_id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, address TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, visit_count INTEGER NOT NULL, first_visited_ms INTEGER NOT NULL, last_visited_ms INTEGER NOT NULL)',
   );
@@ -562,6 +738,26 @@ class SqlitePrivateDataStore implements PrivateDataStore, VisitDiagnosticStore {
 
   static Future<void> _createParkingEventsTable(Database db) => db.execute(
     'CREATE TABLE parking_events (id INTEGER PRIMARY KEY AUTOINCREMENT, latitude REAL NOT NULL, longitude REAL NOT NULL, at_ms INTEGER NOT NULL)',
+  );
+
+  static Future<void> _createPrayerTables(Database db) async {
+    await db.execute(
+      'CREATE TABLE prayers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, text TEXT NOT NULL, created_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE prayer_routines (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_ms INTEGER NOT NULL)',
+    );
+    await db.execute(
+      'CREATE TABLE prayer_routine_items (routine_id INTEGER NOT NULL, prayer_id INTEGER NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (routine_id, prayer_id))',
+    );
+  }
+
+  Prayer _prayerFromRow(Map<String, Object?> row) => Prayer(
+    id: row['id']! as int,
+    name: row['name']! as String,
+    text: row['text']! as String,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_ms']! as int),
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(row['updated_ms']! as int),
   );
 
   static Future<void> _migrateCustomPlacesToV4(Database db) async {

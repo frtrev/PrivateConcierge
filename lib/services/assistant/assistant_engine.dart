@@ -13,6 +13,7 @@ import '../../services/query/local_query_engine.dart';
 import '../../services/query/place_detail_follow_up.dart';
 import '../../services/tracking/tracking_query_engine.dart';
 import '../../services/local_ai/local_ai_coordinator.dart';
+import '../../services/prayers/prayer_conversation_service.dart';
 
 class AssistantEngine {
   AssistantEngine({
@@ -25,6 +26,7 @@ class AssistantEngine {
     required this.tracking,
     PlaceDetailFollowUpResolver? placeDetails,
     this.localAi,
+    this.prayers,
   }) : placeDetails = placeDetails ?? PlaceDetailFollowUpResolver();
 
   final LocalQueryEngine queries;
@@ -36,8 +38,11 @@ class AssistantEngine {
   final PlaceDetailFollowUpResolver placeDetails;
   final TrackingQueryEngine tracking;
   final LocalAiCoordinator? localAi;
+  final PrayerConversationService? prayers;
 
   Future<AssistantResult> answer(String text) async {
+    final prayerAnswer = await prayers?.handle(text);
+    if (prayerAnswer != null) return prayerAnswer;
     final normalized = text
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9 .?+\-*/]'), ' ')

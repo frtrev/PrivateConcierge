@@ -33,6 +33,7 @@ import 'app_theme_controller.dart';
 import '../services/local_ai/development_local_ai_service.dart';
 import '../services/local_ai/local_ai_coordinator.dart';
 import '../services/local_ai/model_manifest.dart';
+import '../services/prayers/prayer_conversation_service.dart';
 
 class AppDependencies {
   AppDependencies._({
@@ -51,6 +52,8 @@ class AppDependencies {
     required this.assistant,
     required this.speechVoices,
     required this.localAi,
+    required this.prayerConversation,
+    required this.prayers,
   });
   final BootstrapService bootstrap;
   final RegionPackageManager packages;
@@ -67,6 +70,8 @@ class AppDependencies {
   final AssistantEngine assistant;
   final SpeechVoiceService speechVoices;
   final DevelopmentLocalAiService localAi;
+  final PrayerConversationService prayerConversation;
+  final PrayerStore prayers;
   static Future<AppDependencies> create() async {
     final preferences = await SharedPreferences.getInstance();
     const configuredManifest = String.fromEnvironment(
@@ -144,6 +149,7 @@ class AppDependencies {
       notificationService: notifications,
     );
     final commands = DeterministicCommandInterpreter();
+    final prayerConversation = PrayerConversationService(privateData);
     final assistant = AssistantEngine(
       queries: queryEngine,
       commands: commands,
@@ -153,6 +159,7 @@ class AppDependencies {
       profiles: profiles,
       tracking: TrackingQueryEngine(privateData),
       localAi: LocalAiCoordinator(localAi),
+      prayers: prayerConversation,
     );
     return AppDependencies._(
       packages: packages,
@@ -176,6 +183,8 @@ class AppDependencies {
       speechVoices: speechVoices,
       bootstrap: bootstrap,
       localAi: localAi,
+      prayerConversation: prayerConversation,
+      prayers: privateData,
     );
   }
 }

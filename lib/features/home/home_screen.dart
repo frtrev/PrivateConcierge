@@ -9,6 +9,7 @@ import '../../services/storage/private_data_store.dart';
 import '../../core/models/unknown_place_candidate.dart';
 import '../../core/models/region.dart';
 import '../routines/routines_screen.dart';
+import '../prayers/prayer_library_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.dependencies});
@@ -469,6 +470,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               MaterialPageRoute(
                 builder: (_) =>
                     VoiceAssistantScreen(dependencies: widget.dependencies),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.self_improvement),
+            label: const Text('Prayers and prayer routines'),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    PrayerLibraryScreen(dependencies: widget.dependencies),
               ),
             ),
           ),

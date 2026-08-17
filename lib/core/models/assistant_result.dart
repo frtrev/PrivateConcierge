@@ -125,6 +125,7 @@ class AssistantResult {
     this.actions = const [],
     this.context = const AssistantConversationState(),
     this.usedLocalAi = false,
+    this.prayerChoices = const [],
   });
 
   final String response;
@@ -134,6 +135,7 @@ class AssistantResult {
   final List<AssistantAction> actions;
   final AssistantConversationState context;
   final bool usedLocalAi;
+  final List<PrayerChoice> prayerChoices;
 
   PlaceResult? get selectedPlace {
     final selectedId = context.selectedPlaceId;
@@ -153,7 +155,15 @@ class AssistantResult {
     'actions': actions.map((action) => action.toMap()).toList(growable: false),
     'context': context.toMap(),
     'usedLocalAi': usedLocalAi,
+    'prayerChoices': prayerChoices.map((choice) => choice.toMap()).toList(),
   };
+}
+
+class PrayerChoice {
+  const PrayerChoice({required this.id, required this.name});
+  final int id;
+  final String name;
+  Map<String, Object?> toMap() => {'id': id, 'name': name};
 }
 
 class AssistantPlatformCapabilities {
