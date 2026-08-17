@@ -25,6 +25,7 @@ import '../services/routines/routine_engine.dart';
 import '../services/storage/private_data_store.dart';
 import '../services/voice/voice_recognition_service.dart';
 import '../services/voice/speech_voice_service.dart';
+import '../services/voice/kokoro_tts_service.dart';
 import '../services/visits/visit_tracker.dart';
 import '../services/tracking/tracking_query_engine.dart';
 import '../core/models/geo.dart';
@@ -102,6 +103,9 @@ class AppDependencies {
     final voice = AndroidOnDeviceVoiceRecognitionService();
     final notifications = LocalNotificationService();
     final profiles = UserProfileService(preferences);
+    final kokoro = KokoroTtsService();
+    await kokoro.initialize();
+    final speechVoices = SpeechVoiceService(preferences, kokoro);
     final routines = RoutineEngine(
       privateData,
       notifications,
@@ -169,7 +173,7 @@ class AppDependencies {
       queryEngine: queryEngine,
       navigation: const PlatformNavigationService(),
       assistant: assistant,
-      speechVoices: const SpeechVoiceService(),
+      speechVoices: speechVoices,
       bootstrap: bootstrap,
       localAi: localAi,
     );

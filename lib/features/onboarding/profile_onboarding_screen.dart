@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/user_profile.dart';
 import '../../services/voice/speech_voice_service.dart';
+import '../../services/voice/kokoro_tts_service.dart';
 
 class ProfileOnboardingScreen extends StatefulWidget {
   const ProfileOnboardingScreen({
@@ -237,6 +238,95 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen>
           const SizedBox(height: 28),
           const Text('Charon voice'),
           const SizedBox(height: 8),
+          ValueListenableBuilder<KokoroStatus>(
+            valueListenable: widget.speechVoices.kokoro.status,
+            builder: (context, status, _) => Card.outlined(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.graphic_eq),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Kokoro-82M embedded voices',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Optional private speech generated entirely on this device. OS voices remain available.',
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Kokoro v1.1 INT8 • 140 MB download • about 205 MB installed',
+                    ),
+                    if (status.state == KokoroInstallState.downloading) ...[
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(
+                        value: status.totalBytes > 0
+                            ? status.downloadedBytes / status.totalBytes
+                            : null,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${(status.downloadedBytes / 1048576).toStringAsFixed(1)} of '
+                        '${(status.totalBytes / 1048576).toStringAsFixed(1)} MB',
+                      ),
+                    ] else if (status.state ==
+                        KokoroInstallState.installing) ...[
+                      const SizedBox(height: 12),
+                      const LinearProgressIndicator(),
+                      const SizedBox(height: 6),
+                      const Text('Verifying and installing…'),
+                    ] else if (status.error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        status.error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    if (status.installed)
+                      const Row(
+                        children: [
+                          Icon(Icons.check_circle_outline),
+                          SizedBox(width: 8),
+                          Text('Downloaded and ready'),
+                        ],
+                      )
+                    else
+                      FilledButton.icon(
+                        onPressed:
+                            status.state == KokoroInstallState.downloading ||
+                                status.state == KokoroInstallState.installing
+                            ? null
+                            : () async {
+                                try {
+                                  await widget.speechVoices.kokoro.download();
+                                  if (mounted) _refreshVoices();
+                                } catch (_) {}
+                              },
+                        icon: const Icon(Icons.download),
+                        label: Text(
+                          status.state == KokoroInstallState.failed
+                              ? 'Retry Kokoro download'
+                              : 'Download Kokoro voices',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           if (Platform.isAndroid) ...[
             FutureBuilder<List<SpeechEngine>>(
               future: engines,

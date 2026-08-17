@@ -1,4 +1,7 @@
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'kokoro_tts_service.dart';
 
 class SpeechVoice {
   const SpeechVoice({
@@ -29,9 +32,12 @@ class SpeechEngine {
 }
 
 class SpeechVoiceService {
-  const SpeechVoiceService();
+  SpeechVoiceService(this._preferences, this.kokoro);
 
   static const _channel = MethodChannel('private_concierge/speech_voice');
+  static const _selectedKey = 'charon.speech.selectedVoiceId';
+  final SharedPreferences _preferences;
+  final KokoroTtsService kokoro;
 
   Future<List<SpeechVoice>> voices() async {
     final values =
@@ -40,6 +46,17 @@ class SpeechVoiceService {
         .whereType<Map<Object?, Object?>>()
         .map(SpeechVoice.fromMap)
         .toList();
+    if (kokoro.status.value.installed) {
+      voices.addAll(
+        KokoroTtsService.voices.map(
+          (voice) => SpeechVoice(
+            id: voice.id,
+            name: voice.name,
+            locale: 'Embedded • offline',
+          ),
+        ),
+      );
+    }
     voices.sort((a, b) {
       if (a.id == 'system:default') return -1;
       if (b.id == 'system:default') return 1;
@@ -48,8 +65,9 @@ class SpeechVoiceService {
     return voices;
   }
 
-  Future<String?> selectedVoiceId() =>
-      _channel.invokeMethod<String>('selectedVoice');
+  Future<String?> selectedVoiceId() async =>
+      _preferences.getString(_selectedKey) ??
+      await _channel.invokeMethod<String>('selectedVoice');
 
   Future<List<SpeechEngine>> engines() async {
     final values =
@@ -70,18 +88,43 @@ class SpeechVoiceService {
   Future<void> selectEngine(String engineId) =>
       _channel.invokeMethod<void>('selectEngine', {'engineId': engineId});
 
-  Future<void> preview({required String voiceId, required String text}) =>
-      _channel.invokeMethod<void>('preview', {
-        'voiceId': voiceId,
-        'text': text,
-      });
+  Future<void> preview({required String voiceId, required String text}) async {
+    final kokoroVoice = _kokoroVoice(voiceId);
+    if (kokoroVoice != null) {
+      await kokoro.speak(text, kokoroVoice, wait: false);
+      return;
+    }
+    await _channel.invokeMethod<void>('preview', {
+      'voiceId': voiceId,
+      'text': text,
+    });
+  }
 
-  Future<void> speak(String text) =>
-      _channel.invokeMethod<void>('speak', {'text': text});
+  Future<void> speak(String text) async {
+    final selected = await selectedVoiceId();
+    final kokoroVoice = _kokoroVoice(selected);
+    if (kokoroVoice != null) {
+      await kokoro.speak(text, kokoroVoice);
+      return;
+    }
+    await _channel.invokeMethod<void>('speak', {'text': text});
+  }
 
-  Future<void> select(String voiceId) =>
-      _channel.invokeMethod<void>('select', {'voiceId': voiceId});
+  Future<void> select(String voiceId) async {
+    await _preferences.setString(_selectedKey, voiceId);
+    if (!voiceId.startsWith('kokoro:')) {
+      await _channel.invokeMethod<void>('select', {'voiceId': voiceId});
+    }
+  }
 
   Future<bool> installVoices() async =>
       await _channel.invokeMethod<bool>('installVoices') ?? false;
+
+  KokoroVoice? _kokoroVoice(String? id) {
+    if (id == null) return null;
+    for (final voice in KokoroTtsService.voices) {
+      if (voice.id == id) return voice;
+    }
+    return null;
+  }
 }
