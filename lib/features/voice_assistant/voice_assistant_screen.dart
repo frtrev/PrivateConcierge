@@ -1,9 +1,14 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../app/app_dependencies.dart';
 import '../../core/models/assistant_result.dart';
 import '../../core/models/poi.dart';
+import '../../core/models/prayer.dart';
 import '../../services/voice/voice_recognition_service.dart';
+import '../../services/prayers/prayer_routine_sequence.dart';
 
 class VoiceAssistantController {
   VoidCallback? _listener;
@@ -42,6 +47,11 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   PointOfInterest? selectedPlace;
   AssistantResult? assistantResult;
   bool openingMaps = false;
+  bool prayerPlaying = false;
+  bool prayerPaused = false;
+  bool androidPrayerInterrupted = false;
+  bool prayerCancelled = false;
+  Completer<void>? prayerResumeCompleter;
 
   @override
   void initState() {
@@ -68,7 +78,10 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
   }
 
   Future<void> _listen() async {
-    await for (final result in widget.dependencies.voice.listenOnce()) {
+    await for (final result in widget.dependencies.voice.listenOnce(
+      punctuatePauses:
+          widget.dependencies.prayerConversation.isCapturingPrayerText,
+    )) {
       if (!mounted) return;
       await _publishCarStatus(
         result.text == null && result.state == VoiceRecognitionState.completed
@@ -114,6 +127,16 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     response = answer.spokenResponse;
     selectedPlace = answer.selectedPlace?.toPoi();
     assistantResult = answer;
+    final prayerChoice =
+        answer.context.lastIntent == 'playPrayer' &&
+            answer.prayerChoices.length == 1
+        ? answer.prayerChoices.single
+        : null;
+    if (mounted) {
+      setState(() {
+        if (prayerChoice != null) prayerPlaying = true;
+      });
+    }
     try {
       await _carChannel.invokeMethod<void>('publishResult', answer.toMap());
     } on PlatformException {
@@ -149,6 +172,11 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
         // Text remains available if speech synthesis is unavailable.
       }
     }
+    if (prayerChoice != null) {
+      await _waitForPrayerResume();
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await _playPrayerChoice(prayerChoice, announce: false);
+    }
     if (mounted) setState(() => state = VoiceRecognitionState.completed);
     if (asksFollowUp && mounted) {
       await _listen();
@@ -165,6 +193,11 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
 
   @override
   void dispose() {
+    prayerCancelled = true;
+    if (prayerResumeCompleter?.isCompleted == false) {
+      prayerResumeCompleter!.complete();
+    }
+    unawaited(widget.dependencies.speechVoices.stop());
     widget.controller?.detach(_requestListening);
     textController.dispose();
     super.dispose();
@@ -204,11 +237,81 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
     }
   }
 
-  Future<void> _playPrayer(int id) async {
+  Future<void> _playPrayerChoice(
+    PrayerChoice choice, {
+    bool announce = true,
+  }) async {
+    if (!prayerPlaying && mounted) {
+      setState(() {
+        prayerPlaying = true;
+        prayerCancelled = false;
+      });
+    }
+    if (announce) {
+      await widget.dependencies.speechVoices.speak("Let's begin.");
+      await _waitForPrayerResume();
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+    try {
+      if (!choice.isRoutine) {
+        await _speakPausablePrayer(choice.id);
+        return;
+      }
+      final routines = await widget.dependencies.prayers.prayerRoutines();
+      final matches = routines.where((routine) => routine.id == choice.id);
+      if (matches.isEmpty) return;
+      final prayers = PrayerRoutineSequence.expand(matches.first, routines);
+      for (var index = 0; index < prayers.length; index++) {
+        if (prayerCancelled) return;
+        await _speakPausablePrayerValue(prayers[index]);
+        if (!prayerCancelled && index + 1 < prayers.length) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          prayerPlaying = false;
+          prayerPaused = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _speakPausablePrayer(int id) async {
     final prayers = await widget.dependencies.prayers.prayers();
     final matches = prayers.where((prayer) => prayer.id == id);
-    if (matches.isEmpty) return;
-    await widget.dependencies.speechVoices.speak(matches.first.text);
+    if (matches.isNotEmpty) await _speakPausablePrayerValue(matches.first);
+  }
+
+  Future<void> _speakPausablePrayerValue(Prayer prayer) async {
+    do {
+      await _waitForPrayerResume();
+      if (prayerCancelled) return;
+      androidPrayerInterrupted = false;
+      await widget.dependencies.speechVoices.speakPrayer(prayer);
+      await _waitForPrayerResume();
+    } while (Platform.isAndroid && androidPrayerInterrupted);
+  }
+
+  Future<void> _waitForPrayerResume() async {
+    if (!prayerPaused || prayerCancelled) return;
+    prayerResumeCompleter ??= Completer<void>();
+    await prayerResumeCompleter!.future;
+  }
+
+  Future<void> _togglePrayerPause() async {
+    if (!prayerPlaying) return;
+    if (prayerPaused) {
+      await widget.dependencies.speechVoices.resume();
+      prayerResumeCompleter?.complete();
+      prayerResumeCompleter = null;
+      if (mounted) setState(() => prayerPaused = false);
+    } else {
+      if (Platform.isAndroid) androidPrayerInterrupted = true;
+      if (mounted) setState(() => prayerPaused = true);
+      await widget.dependencies.speechVoices.pause();
+    }
   }
 
   String _placeDetail(PlaceResult place) {
@@ -294,12 +397,31 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> {
                             for (final prayer in assistantResult!.prayerChoices)
                               Card.outlined(
                                 child: ListTile(
-                                  leading: const Icon(Icons.self_improvement),
+                                  leading: Icon(
+                                    prayer.isRoutine
+                                        ? Icons.playlist_play
+                                        : Icons.self_improvement,
+                                  ),
                                   title: Text(prayer.name),
+                                  subtitle: prayer.isRoutine
+                                      ? const Text('Prayer routine')
+                                      : const Text('Prayer'),
                                   trailing: const Icon(Icons.play_arrow),
-                                  onTap: () => _playPrayer(prayer.id),
+                                  onTap: () => _playPrayerChoice(prayer),
                                 ),
                               ),
+                          ],
+                          if (prayerPlaying) ...[
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: _togglePrayerPause,
+                              icon: Icon(
+                                prayerPaused ? Icons.play_arrow : Icons.pause,
+                              ),
+                              label: Text(
+                                prayerPaused ? 'Resume prayer' : 'Pause prayer',
+                              ),
+                            ),
                           ],
                           if (assistantResult?.places.isNotEmpty == true) ...[
                             const SizedBox(height: 12),

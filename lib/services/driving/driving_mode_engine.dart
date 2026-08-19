@@ -14,27 +14,46 @@ class MotionEstimate {
   const MotionEstimate({
     required this.mode,
     required this.speedMetersPerSecond,
+    this.displacementMeters = 0,
+    this.elapsedSeconds = 0,
+    this.observationAccepted = true,
+    this.reason,
   });
   final MotionMode mode;
   final double speedMetersPerSecond;
+  final double displacementMeters;
+  final double elapsedSeconds;
+  final bool observationAccepted;
+  final String? reason;
 }
 
 class DrivingModeDetector {
   DrivingModeDetector({
     this.enterSpeedMetersPerSecond = 4.5,
     this.exitSpeedMetersPerSecond = 2,
-    this.enterSamples = 2,
-    this.exitSamples = 3,
+    this.enterSamples = 3,
+    this.exitSamples = 4,
+    this.maximumAccuracyMeters = 65,
+    this.minimumDrivingDuration = const Duration(seconds: 45),
+    this.minimumDrivingDisplacementMeters = 150,
+    this.minimumStopDuration = const Duration(seconds: 90),
   });
   final double enterSpeedMetersPerSecond;
   final double exitSpeedMetersPerSecond;
   final int enterSamples;
   final int exitSamples;
+  final double maximumAccuracyMeters;
+  final Duration minimumDrivingDuration;
+  final double minimumDrivingDisplacementMeters;
+  final Duration minimumStopDuration;
   Coordinates? _lastCoordinates;
   DateTime? _lastAt;
   int _fastSamples = 0;
   int _slowSamples = 0;
   MotionMode _mode = MotionMode.stationary;
+  DateTime? _fastSince;
+  Coordinates? _fastStart;
+  DateTime? _slowSince;
 
   MotionMode get mode => _mode;
 
@@ -48,35 +67,105 @@ class DrivingModeDetector {
     }
     final seconds = at.difference(previousAt).inMilliseconds / 1000;
     if (seconds < 2) {
-      return MotionEstimate(mode: _mode, speedMetersPerSecond: 0);
+      return MotionEstimate(
+        mode: _mode,
+        speedMetersPerSecond: 0,
+        elapsedSeconds: seconds,
+        observationAccepted: false,
+        reason: 'interval_too_short',
+      );
     }
     if (seconds > 180) {
-      _fastSamples = 0;
-      _slowSamples = 0;
-      _mode = MotionMode.stationary;
-      return MotionEstimate(mode: _mode, speedMetersPerSecond: 0);
+      _resetEvidence();
+      return MotionEstimate(
+        mode: _mode,
+        speedMetersPerSecond: 0,
+        elapsedSeconds: seconds,
+        observationAccepted: false,
+        reason: 'update_gap',
+      );
     }
-    final speed = distanceMeters(previous, coordinates) / seconds;
-    if (speed >= enterSpeedMetersPerSecond) {
+    final currentAccuracy = coordinates.horizontalAccuracyMeters;
+    final previousAccuracy = previous.horizontalAccuracyMeters;
+    if ((currentAccuracy != null && currentAccuracy > maximumAccuracyMeters) ||
+        (previousAccuracy != null &&
+            previousAccuracy > maximumAccuracyMeters)) {
+      _resetEvidence();
+      return MotionEstimate(
+        mode: _mode,
+        speedMetersPerSecond: 0,
+        elapsedSeconds: seconds,
+        observationAccepted: false,
+        reason: 'poor_accuracy',
+      );
+    }
+    final displacement = distanceMeters(previous, coordinates);
+    final uncertainty = (currentAccuracy ?? 0) + (previousAccuracy ?? 0);
+    final meaningfulDisplacement = displacement > uncertainty.clamp(25, 100);
+    final calculatedSpeed = meaningfulDisplacement
+        ? displacement / seconds
+        : 0.0;
+    final reportedSpeed = coordinates.reportedSpeedMetersPerSecond;
+    final speed = reportedSpeed != null && reportedSpeed.isFinite
+        ? reportedSpeed
+        : calculatedSpeed;
+    final vehicleLike =
+        speed >= enterSpeedMetersPerSecond &&
+        meaningfulDisplacement &&
+        (reportedSpeed == null || reportedSpeed >= enterSpeedMetersPerSecond);
+    if (vehicleLike) {
+      _fastSince ??= previousAt;
+      _fastStart ??= previous;
       _fastSamples++;
       _slowSamples = 0;
+      _slowSince = null;
     } else if (speed <= exitSpeedMetersPerSecond) {
+      _slowSince ??= previousAt;
       _slowSamples++;
       _fastSamples = 0;
+      _fastSince = null;
+      _fastStart = null;
     } else {
-      _fastSamples = 0;
-      _slowSamples = 0;
+      _resetEvidence();
     }
-    if (_mode != MotionMode.driving && _fastSamples >= enterSamples) {
+    final drivingDuration = _fastSince == null
+        ? Duration.zero
+        : at.difference(_fastSince!);
+    final drivingDisplacement = _fastStart == null
+        ? 0.0
+        : distanceMeters(_fastStart!, coordinates);
+    if (_mode != MotionMode.driving &&
+        _fastSamples >= enterSamples &&
+        drivingDuration >= minimumDrivingDuration &&
+        drivingDisplacement >= minimumDrivingDisplacementMeters) {
       _mode = MotionMode.driving;
       _slowSamples = 0;
-    } else if (_mode == MotionMode.driving && _slowSamples >= exitSamples) {
+      _slowSince = null;
+    } else if (_mode == MotionMode.driving &&
+        _slowSamples >= exitSamples &&
+        _slowSince != null &&
+        at.difference(_slowSince!) >= minimumStopDuration) {
       _mode = MotionMode.stationary;
       _fastSamples = 0;
+      _fastSince = null;
+      _fastStart = null;
     } else if (_mode != MotionMode.driving) {
       _mode = speed > 1.2 ? MotionMode.walking : MotionMode.stationary;
     }
-    return MotionEstimate(mode: _mode, speedMetersPerSecond: speed);
+    return MotionEstimate(
+      mode: _mode,
+      speedMetersPerSecond: speed,
+      displacementMeters: displacement,
+      elapsedSeconds: seconds,
+    );
+  }
+
+  void _resetEvidence() {
+    _fastSamples = 0;
+    _slowSamples = 0;
+    _fastSince = null;
+    _fastStart = null;
+    _slowSince = null;
   }
 }
 
@@ -107,12 +196,20 @@ class DrivingContextEngine {
   Future<void> observe(Coordinates coordinates, DateTime at) async {
     final previousMode = detector.mode;
     final estimate = detector.observe(coordinates, at);
+    if (!estimate.observationAccepted && privateData is VisitDiagnosticStore) {
+      final accuracy = coordinates.horizontalAccuracyMeters;
+      await (privateData as VisitDiagnosticStore).recordVisitDiagnostic(
+        'driving_observation_ignored',
+        '${estimate.reason}; interval=${estimate.elapsedSeconds.toStringAsFixed(1)}s; accuracy=${accuracy?.toStringAsFixed(1) ?? 'unknown'}m',
+        at,
+      );
+    }
     if (estimate.mode != previousMode && privateData is VisitDiagnosticStore) {
       await (privateData as VisitDiagnosticStore).recordVisitDiagnostic(
         estimate.mode == MotionMode.driving
             ? 'driving_mode_entered'
             : 'driving_mode_exited',
-        'Inferred speed ${estimate.speedMetersPerSecond.toStringAsFixed(1)} m/s',
+        'speed=${estimate.speedMetersPerSecond.toStringAsFixed(1)}m/s; displacement=${estimate.displacementMeters.toStringAsFixed(1)}m; interval=${estimate.elapsedSeconds.toStringAsFixed(1)}s; accuracy=${coordinates.horizontalAccuracyMeters?.toStringAsFixed(1) ?? 'unknown'}m',
         at,
       );
     }

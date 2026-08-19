@@ -95,7 +95,11 @@ import Network
           let voiceId = values["voiceId"] as? String,
           let text = values["text"] as? String
         else { result(false); return }
-        self.previewVoice(voiceId: voiceId, text: text)
+        self.previewVoice(
+          voiceId: voiceId,
+          text: text,
+          rateMultiplier: values["rate"] as? Double ?? 1.0
+        )
         result(true)
       case "speak":
         guard let values = call.arguments as? [String: Any],
@@ -107,8 +111,15 @@ import Network
         self.pendingPhoneUtterance = self.previewVoice(
           voiceId: UserDefaults.standard.string(forKey: "charon.speechVoiceId"),
           text: text,
+          rateMultiplier: values["rate"] as? Double ?? 1.0,
           stopExisting: false
         )
+      case "pause":
+        result(self.previewSpeechSynthesizer.pauseSpeaking(at: .word))
+      case "resume":
+        result(self.previewSpeechSynthesizer.continueSpeaking())
+      case "stop":
+        result(self.previewSpeechSynthesizer.stopSpeaking(at: .immediate))
       case "installVoices":
         result(false)
       default:
@@ -212,6 +223,7 @@ import Network
   private func previewVoice(
     voiceId: String?,
     text: String,
+    rateMultiplier: Double = 1.0,
     stopExisting: Bool = true
   ) -> AVSpeechUtterance {
     let session = AVAudioSession.sharedInstance()
@@ -220,6 +232,13 @@ import Network
     if stopExisting { previewSpeechSynthesizer.stopSpeaking(at: .immediate) }
     let utterance = AVSpeechUtterance(string: text)
     if let voiceId { utterance.voice = AVSpeechSynthesisVoice(identifier: voiceId) }
+    utterance.rate = min(
+      AVSpeechUtteranceMaximumSpeechRate,
+      max(
+        AVSpeechUtteranceMinimumSpeechRate,
+        AVSpeechUtteranceDefaultSpeechRate * Float(rateMultiplier)
+      )
+    )
     utterance.preUtteranceDelay = 0.2
     previewSpeechSynthesizer.speak(utterance)
     return utterance
@@ -459,7 +478,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
   }
 
   func listenFromCar(completion: @escaping (String?, String?) -> Void) {
-    authorizeAndListen { value in
+    authorizeAndListen(result: { value in
       if let text = value as? String {
         completion(text, nil)
       } else if let error = value as? FlutterError {
@@ -467,7 +486,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
       } else {
         completion(nil, "Voice recognition failed.")
       }
-    }
+    }, punctuatePauses: false)
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -477,13 +496,20 @@ private final class IosOnDeviceSpeechHandler: NSObject {
         recognizer?.supportsOnDeviceRecognition == true
       )
     case "listenOnce":
-      authorizeAndListen(result: result)
+      let arguments = call.arguments as? [String: Any]
+      authorizeAndListen(
+        result: result,
+        punctuatePauses: arguments?["punctuatePauses"] as? Bool ?? false
+      )
     default:
       result(FlutterMethodNotImplemented)
     }
   }
 
-  private func authorizeAndListen(result: @escaping FlutterResult) {
+  private func authorizeAndListen(
+    result: @escaping FlutterResult,
+    punctuatePauses: Bool
+  ) {
     guard pendingResult == nil else {
       result(
         FlutterError(
@@ -517,7 +543,10 @@ private final class IosOnDeviceSpeechHandler: NSObject {
             )
             return
           }
-          self?.startListening(result: result)
+          self?.startListening(
+            result: result,
+            punctuatePauses: punctuatePauses
+          )
         }
       }
     }
@@ -525,7 +554,8 @@ private final class IosOnDeviceSpeechHandler: NSObject {
 
   private func startListening(
     result: @escaping FlutterResult,
-    retryCount: Int = 0
+    retryCount: Int = 0,
+    punctuatePauses: Bool = false
   ) {
     guard let recognizer,
       recognizer.supportsOnDeviceRecognition
@@ -557,12 +587,20 @@ private final class IosOnDeviceSpeechHandler: NSObject {
 
       CarAudioCuePlayer.shared.playListeningCue()
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
-        self?.beginRecognition(recognizer: recognizer, result: result)
+        self?.beginRecognition(
+          recognizer: recognizer,
+          result: result,
+          punctuatePauses: punctuatePauses
+        )
       }
     } catch {
       if retryCount == 0 {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-          self?.startListening(result: result, retryCount: 1)
+          self?.startListening(
+            result: result,
+            retryCount: 1,
+            punctuatePauses: punctuatePauses
+          )
         }
       } else {
         finish(error: error.localizedDescription, fallbackResult: result)
@@ -590,13 +628,14 @@ private final class IosOnDeviceSpeechHandler: NSObject {
 
   private func beginRecognition(
     recognizer: SFSpeechRecognizer,
-    result: @escaping FlutterResult
+    result: @escaping FlutterResult,
+    punctuatePauses: Bool
   ) {
     do {
       let request = SFSpeechAudioBufferRecognitionRequest()
       request.requiresOnDeviceRecognition = true
       request.shouldReportPartialResults = true
-      request.taskHint = .search
+      request.taskHint = punctuatePauses ? .dictation : .search
       recognitionRequest = request
       pendingResult = result
       latestTranscription = ""
@@ -618,7 +657,10 @@ private final class IosOnDeviceSpeechHandler: NSObject {
         [weak self] response, error in
         guard let self else { return }
         if let response {
-          let text = response.bestTranscription.formattedString
+          let rawText = punctuatePauses
+            ? self.punctuate(response.bestTranscription)
+            : response.bestTranscription.formattedString
+          let text = rawText
             .trimmingCharacters(in: .whitespacesAndNewlines)
           if !text.isEmpty {
             latestTranscription = text
@@ -634,7 +676,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
             }
             silenceWorkItem = silence
             DispatchQueue.main.asyncAfter(
-              deadline: .now() + 1.4,
+              deadline: .now() + (punctuatePauses ? 2.5 : 1.4),
               execute: silence
             )
           }
@@ -656,10 +698,45 @@ private final class IosOnDeviceSpeechHandler: NSObject {
         }
       }
       timeoutWorkItem = timeout
-      DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeout)
+      DispatchQueue.main.asyncAfter(
+        deadline: .now() + (punctuatePauses ? 120 : 12),
+        execute: timeout
+      )
     } catch {
       finish(error: error.localizedDescription, fallbackResult: result)
     }
+  }
+
+  private func punctuate(_ transcription: SFTranscription) -> String {
+    var output = ""
+    var previousEnd: TimeInterval?
+    var capitalizeNext = true
+    for segment in transcription.segments {
+      let word = segment.substring.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
+      guard !word.isEmpty else { continue }
+      if let previousEnd {
+        let pause = segment.timestamp - previousEnd
+        if pause >= 0.9 {
+          if !output.hasSuffix(".") && !output.hasSuffix("!") &&
+            !output.hasSuffix("?") { output += "." }
+          capitalizeNext = true
+        } else if pause >= 0.45 {
+          if !output.hasSuffix(",") && !output.hasSuffix(";") &&
+            !output.hasSuffix(":") { output += "," }
+        }
+        output += " "
+      }
+      if capitalizeNext {
+        output += word.prefix(1).uppercased() + word.dropFirst()
+        capitalizeNext = false
+      } else {
+        output += word
+      }
+      previousEnd = segment.timestamp + segment.duration
+    }
+    return output
   }
 
   private func finish(

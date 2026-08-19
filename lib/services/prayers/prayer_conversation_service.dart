@@ -17,6 +17,10 @@ class PrayerConversationService {
   String? _draftText;
   Prayer? _editing;
 
+  bool get isCapturingPrayerText =>
+      _state == _PrayerConversationState.awaitingText ||
+      _state == _PrayerConversationState.editingText;
+
   void beginRecording() {
     _reset();
     _state = _PrayerConversationState.awaitingText;
@@ -36,7 +40,7 @@ class PrayerConversationService {
     }
     switch (_state) {
       case _PrayerConversationState.awaitingText:
-        _draftText = text;
+        _draftText = _formatPrayerText(text);
         _state = _PrayerConversationState.awaitingName;
         return _message('What do you want to name this prayer?');
       case _PrayerConversationState.awaitingName:
@@ -45,12 +49,12 @@ class PrayerConversationService {
         return _message('I saved the prayer as $text.');
       case _PrayerConversationState.editingText:
         final prayer = _editing!;
-        await store.savePrayer(id: prayer.id, text: text);
+        await store.savePrayer(id: prayer.id, text: _formatPrayerText(text));
         _reset();
         return _message('I updated ${prayer.name}.');
       case _PrayerConversationState.awaitingPlayName:
         _state = _PrayerConversationState.idle;
-        return _findPrayer(text);
+        return _findPrayerOrRoutine(text);
       case _PrayerConversationState.idle:
         break;
     }
@@ -59,22 +63,25 @@ class PrayerConversationService {
     if (_asksToSave(normalized)) {
       _state = _PrayerConversationState.awaitingText;
       return _message(
-        "Of course, I'm listening. What prayer would you like me to record?",
+        "Of course, you can start praying after the beep, I'll be listening.",
       );
     }
     if (_asksToPray(normalized)) {
       final inlineName = _inlinePrayerName(normalized);
-      if (inlineName != null) return _findPrayer(inlineName);
+      if (inlineName != null) return _findPrayerOrRoutine(inlineName);
       _state = _PrayerConversationState.awaitingPlayName;
-      return _message('Of course. What do you want to pray?');
+      return _message('Which prayer or prayer routine would you like?');
     }
     return null;
   }
 
-  Future<AssistantResult> _findPrayer(String requestedName) async {
+  Future<AssistantResult> _findPrayerOrRoutine(String requestedName) async {
     final prayers = await store.prayers();
+    final routines = await store.prayerRoutines();
     final needle = _normalize(requestedName).replaceFirst(
-      RegExp(r'^(the prayer called|prayer called|the prayer|prayer)\s+'),
+      RegExp(
+        r'^(the prayer routine called|prayer routine called|the routine called|routine called|the prayer routine|prayer routine|the routine|routine|the prayer called|prayer called|the prayer|prayer)\s+',
+      ),
       '',
     );
     Prayer? match;
@@ -86,23 +93,56 @@ class PrayerConversationService {
       }
     }
     if (match != null) {
-      return _message('Of course. ${match.text}');
+      return AssistantResult(
+        response: "Let's begin.",
+        spokenResponse: "Let's begin.",
+        type: AssistantResultType.message,
+        context: const AssistantConversationState(lastIntent: 'playPrayer'),
+        prayerChoices: [PrayerChoice(id: match.id, name: match.name)],
+      );
     }
-    if (prayers.isEmpty) {
+    PrayerRoutine? routineMatch;
+    for (final routine in routines) {
+      final name = _normalize(routine.name);
+      if (name == needle || name.contains(needle) || needle.contains(name)) {
+        routineMatch = routine;
+        break;
+      }
+    }
+    if (routineMatch != null) {
+      return AssistantResult(
+        response: "Let's begin.",
+        spokenResponse: "Let's begin.",
+        type: AssistantResultType.message,
+        context: const AssistantConversationState(lastIntent: 'playPrayer'),
+        prayerChoices: [
+          PrayerChoice(
+            id: routineMatch.id,
+            name: routineMatch.name,
+            isRoutine: true,
+          ),
+        ],
+      );
+    }
+    if (prayers.isEmpty && routines.isEmpty) {
       return _message(
-        'You do not have any saved prayers yet. Would you like to save one?',
+        'You do not have any saved prayers or prayer routines yet. Would you like to save a prayer?',
       );
     }
     return AssistantResult(
       response:
-          'I could not find that prayer. I have the following prayers saved:',
+          'I could not find that prayer or routine. Here are your saved options:',
       spokenResponse:
-          'I could not find that prayer. I have the following prayers saved: ${prayers.map((p) => p.name).join(', ')}.',
+          'I could not find that prayer or routine. You have: ${[...prayers.map((p) => p.name), ...routines.map((r) => '${r.name} routine')].join(', ')}.',
       type: AssistantResultType.message,
-      context: const AssistantConversationState(lastIntent: 'listPrayers'),
+      context: const AssistantConversationState(
+        lastIntent: 'listPrayerOptions',
+      ),
       prayerChoices: [
         for (final prayer in prayers)
           PrayerChoice(id: prayer.id, name: prayer.name),
+        for (final routine in routines)
+          PrayerChoice(id: routine.id, name: routine.name, isRoutine: true),
       ],
     );
   }
@@ -113,13 +153,14 @@ class PrayerConversationService {
 
   bool _asksToPray(String text) =>
       RegExp(
-        r'^(lets|let s|let us|i want to|can we|please)\s+pray\b',
+        r'^(lets|let s|let us|i want to|i would like to|i d like to|id like to|can we|please)\s+pray\b',
       ).hasMatch(text) ||
+      RegExp(r'^i feel like\s+praying\b').hasMatch(text) ||
       text == 'pray';
 
   String? _inlinePrayerName(String text) {
     final match = RegExp(
-      r'^(?:lets|let s|let us|i want to|can we|please)\s+pray\s+(.+)$',
+      r'^(?:(?:lets|let s|let us|i want to|i would like to|i d like to|id like to|can we|please)\s+pray|i feel like\s+praying)\s+(.+)$',
     ).firstMatch(text);
     return match?.group(1)?.trim();
   }
@@ -132,6 +173,17 @@ class PrayerConversationService {
       .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
+
+  String _formatPrayerText(String text) {
+    var value = text
+        .trim()
+        .replaceAll(RegExp(r'\s+([,.;!?])'), r'$1')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    if (value.isEmpty) return value;
+    value = '${value[0].toUpperCase()}${value.substring(1)}';
+    if (!RegExp(r'[.!?]$').hasMatch(value)) value = '$value.';
+    return value;
+  }
 
   AssistantResult _message(String value) => AssistantResult(
     response: value,

@@ -18,7 +18,7 @@ class VoiceRecognitionResult {
 
 abstract interface class VoiceRecognitionService {
   Future<bool> isOnDeviceAvailable();
-  Stream<VoiceRecognitionResult> listenOnce();
+  Stream<VoiceRecognitionResult> listenOnce({bool punctuatePauses = false});
 }
 
 class AndroidOnDeviceVoiceRecognitionService
@@ -28,7 +28,9 @@ class AndroidOnDeviceVoiceRecognitionService
   Future<bool> isOnDeviceAvailable() async =>
       await _channel.invokeMethod<bool>('isAvailable') ?? false;
   @override
-  Stream<VoiceRecognitionResult> listenOnce() async* {
+  Stream<VoiceRecognitionResult> listenOnce({
+    bool punctuatePauses = false,
+  }) async* {
     if (!await isOnDeviceAvailable()) {
       yield const VoiceRecognitionResult(
         VoiceRecognitionState.unsupported,
@@ -41,7 +43,9 @@ class AndroidOnDeviceVoiceRecognitionService
       message: 'Listening…',
     );
     try {
-      final text = await _channel.invokeMethod<String>('listenOnce');
+      final text = await _channel.invokeMethod<String>('listenOnce', {
+        'punctuatePauses': punctuatePauses,
+      });
       if (text == null || text.trim().isEmpty) {
         yield const VoiceRecognitionResult(
           VoiceRecognitionState.error,

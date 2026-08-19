@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.StatFs
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.RecognitionService
@@ -31,6 +32,7 @@ class MainActivity : FlutterActivity() {
     private val navigationChannelName = "charon/navigation"
     private val speechRequest = 7001
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingPrayerPunctuation = false
     private var recognizer: SpeechRecognizer? = null
     private var carChannel: MethodChannel? = null
     private var pendingTalkRequest = false
@@ -91,7 +93,10 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isAvailable" -> result.success(isOnDeviceRecognitionAvailable())
-                "listenOnce" -> startOnDeviceRecognition(result)
+                "listenOnce" -> startOnDeviceRecognition(
+                    result,
+                    call.argument<Boolean>("punctuatePauses") ?: false
+                )
                 else -> result.notImplemented()
             }
         }
@@ -118,6 +123,15 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "private_concierge/speech_voice").setMethodCallHandler { call, result ->
             val preferences = getSharedPreferences("charon_speech", Context.MODE_PRIVATE)
             when (call.method) {
+                "pause" -> {
+                    previewTts?.stop()
+                    result.success(true)
+                }
+                "resume" -> result.success(true)
+                "stop" -> {
+                    previewTts?.stop()
+                    result.success(true)
+                }
                 "selectedVoice" -> result.success(preferences.getString("voice_id", null))
                 "selectedEngine" -> result.success(selectedEngineId(preferences))
                 "engines" -> withPreviewTts { tts ->
@@ -182,6 +196,7 @@ class MainActivity : FlutterActivity() {
                                 preferences.getString("voice_id", null) ?: "system:default"
                             } else call.argument<String>("voiceId")
                             val text = call.argument<String>("text") ?: "Hello."
+                            val rate = call.argument<Double>("rate")?.toFloat() ?: 1.0f
                             if (voiceId == "system:default") {
                                 defaultPreviewVoice?.let { tts.voice = it }
                             } else if (voiceId?.startsWith("locale:") == true) {
@@ -190,6 +205,7 @@ class MainActivity : FlutterActivity() {
                                 tts.voice = tts.voices?.firstOrNull { it.name == voiceId }
                             }
                             val utteranceId = if (call.method == "speak") "charon-phone-response" else "charon-preview"
+                            tts.setSpeechRate(rate)
                             if (call.method == "speak") {
                                 pendingPhoneSpeechResult?.success(false)
                                 pendingPhoneSpeechResult = result
@@ -267,6 +283,14 @@ class MainActivity : FlutterActivity() {
                             if (utteranceId != "charon-phone-response") return
                             Handler(Looper.getMainLooper()).post {
                                 pendingPhoneSpeechResult?.success(true)
+                                pendingPhoneSpeechResult = null
+                            }
+                        }
+
+                        override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                            if (utteranceId != "charon-phone-response") return
+                            Handler(Looper.getMainLooper()).post {
+                                pendingPhoneSpeechResult?.success(false)
                                 pendingPhoneSpeechResult = null
                             }
                         }
@@ -351,10 +375,14 @@ class MainActivity : FlutterActivity() {
         return available
     }
 
-    private fun startOnDeviceRecognition(result: MethodChannel.Result) {
+    private fun startOnDeviceRecognition(
+        result: MethodChannel.Result,
+        punctuatePauses: Boolean = false
+    ) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "Requesting RECORD_AUDIO permission")
             pendingResult = result
+            pendingPrayerPunctuation = punctuatePauses
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), speechRequest)
             return
         }
@@ -366,7 +394,24 @@ class MainActivity : FlutterActivity() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, punctuatePauses)
+            if (punctuatePauses) {
+                putExtra(
+                    RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                    2500L
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
+                    2000L
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
+                    10000L
+                )
+            }
+            if (punctuatePauses && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                putExtra("android.speech.extra.ENABLE_FORMATTING", "quality")
+            }
         }
         recognizer?.destroy()
         val onDeviceAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
@@ -377,6 +422,10 @@ class MainActivity : FlutterActivity() {
         } else {
             SpeechRecognizer.createSpeechRecognizer(this)
         }.also { speech ->
+            var latestPartial = ""
+            var silenceStartedAt: Long? = null
+            var wasSpeaking = false
+            val pauseBoundaries = mutableListOf<Pair<Int, Char>>()
             speech.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     Log.d(TAG, "Recognizer ready for speech")
@@ -384,17 +433,46 @@ class MainActivity : FlutterActivity() {
                 override fun onBeginningOfSpeech() {
                     Log.d(TAG, "Recognizer detected speech")
                 }
-                override fun onRmsChanged(rmsdB: Float) = Unit
+                override fun onRmsChanged(rmsdB: Float) {
+                    if (!punctuatePauses) return
+                    val speaking = rmsdB >= 1.5f
+                    val now = SystemClock.elapsedRealtime()
+                    if (wasSpeaking && !speaking) {
+                        silenceStartedAt = now
+                    } else if (!wasSpeaking && speaking) {
+                        val started = silenceStartedAt
+                        val pause = if (started == null) 0 else now - started
+                        val wordCount = latestPartial.trim()
+                            .split(Regex("\\s+"))
+                            .count { it.isNotBlank() }
+                        if (wordCount > 0 && pause >= 450) {
+                            val mark = if (pause >= 900) '.' else ','
+                            if (pauseBoundaries.none { it.first == wordCount }) {
+                                pauseBoundaries.add(wordCount to mark)
+                            }
+                        }
+                        silenceStartedAt = null
+                    }
+                    wasSpeaking = speaking
+                }
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
                 override fun onEndOfSpeech() = Unit
-                override fun onPartialResults(partialResults: Bundle?) = Unit
+                override fun onPartialResults(partialResults: Bundle?) {
+                    latestPartial = partialResults
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        ?: latestPartial
+                }
                 override fun onEvent(eventType: Int, params: Bundle?) = Unit
                 override fun onError(error: Int) {
                     Log.e(TAG, "Recognition failed code=$error")
                     finishSpeechError("Voice recognition failed (code $error).")
                 }
                 override fun onResults(results: Bundle?) {
-                    val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    val rawText = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    val text = if (punctuatePauses && rawText != null) {
+                        punctuateAtPauses(rawText, pauseBoundaries)
+                    } else rawText
                     Log.d(TAG, "Recognition completed hasText=${!text.isNullOrBlank()}")
                     pendingResult?.success(text)
                     pendingResult = null
@@ -406,14 +484,39 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun punctuateAtPauses(
+        text: String,
+        boundaries: List<Pair<Int, Char>>
+    ): String {
+        if (boundaries.isEmpty()) return text
+        val marks = boundaries.toMap()
+        val words = text.trim().split(Regex("\\s+"))
+        val output = StringBuilder()
+        words.forEachIndexed { index, rawWord ->
+            if (output.isNotEmpty()) output.append(' ')
+            val shouldCapitalize = index == 0 || marks[index] == '.'
+            val word = if (shouldCapitalize && rawWord.isNotEmpty()) {
+                rawWord.replaceFirstChar { it.uppercase() }
+            } else rawWord
+            output.append(word)
+            val mark = marks[index + 1]
+            if (mark != null && word.lastOrNull() !in listOf('.', ',', ';', ':', '!', '?')) {
+                output.append(mark)
+            }
+        }
+        return output.toString()
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == speechRequest) {
             val result = pendingResult ?: return
+            val punctuatePauses = pendingPrayerPunctuation
             pendingResult = null
+            pendingPrayerPunctuation = false
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "RECORD_AUDIO permission granted")
-                startOnDeviceRecognition(result)
+                startOnDeviceRecognition(result, punctuatePauses)
             }
             else result.error("permission_denied", "Microphone permission was denied.", null)
         }

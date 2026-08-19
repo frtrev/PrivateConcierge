@@ -66,7 +66,7 @@ void main() {
       prayerChoices: [PrayerChoice(id: 7, name: 'Morning')],
     );
     expect(result.toMap()['prayerChoices'], [
-      {'id': 7, 'name': 'Morning'},
+      {'id': 7, 'name': 'Morning', 'isRoutine': false},
     ]);
   });
 

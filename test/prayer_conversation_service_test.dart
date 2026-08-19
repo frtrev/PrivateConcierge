@@ -51,7 +51,7 @@ class MemoryPrayerStore implements PrayerStore {
   Future<PrayerRoutine> savePrayerRoutine({
     int? id,
     required String name,
-    required List<int> prayerIds,
+    required List<PrayerRoutineStep> steps,
   }) async => throw UnimplementedError();
 }
 
@@ -62,7 +62,7 @@ void main() {
 
     expect(
       (await service.handle('Can you record this prayer?'))!.spokenResponse,
-      contains("I'm listening"),
+      "Of course, you can start praying after the beep, I'll be listening.",
     );
     expect(
       (await service.handle('Please protect my family.'))!.spokenResponse,
@@ -83,11 +83,51 @@ void main() {
 
     await service.handle("Let's pray");
     final found = await service.handle('Morning');
-    expect(found!.spokenResponse, contains('Thank you for this day.'));
+    expect(found!.spokenResponse, "Let's begin.");
+    expect(found.context.lastIntent, 'playPrayer');
+    expect(found.prayerChoices.single.isRoutine, isFalse);
 
     await service.handle('I want to pray');
     final missing = await service.handle('Evening');
     expect(missing!.prayerChoices.single.name, 'Morning');
+  });
+
+  test('natural pray request offers prayers and routines', () async {
+    final store = MemoryPrayerStore();
+    final prayer = await store.savePrayer(
+      name: 'Our Father',
+      text: 'Our Father in heaven.',
+    );
+    store.routines.add(
+      PrayerRoutine(
+        id: 9,
+        name: 'Morning Rosary',
+        steps: [
+          PrayerRoutineStep(
+            type: PrayerRoutineStepType.prayer,
+            referenceId: prayer.id,
+            name: prayer.name,
+            repeatCount: 1,
+            prayer: prayer,
+          ),
+        ],
+        createdAt: DateTime(2026, 8, 18),
+      ),
+    );
+    final service = PrayerConversationService(store);
+
+    expect(
+      (await service.handle('I would like to pray'))!.spokenResponse,
+      'Which prayer or prayer routine would you like?',
+    );
+    final routine = await service.handle('Morning Rosary');
+    expect(routine!.context.lastIntent, 'playPrayer');
+    expect(routine.prayerChoices.single.isRoutine, isTrue);
+
+    await service.handle("I'd like to pray");
+    final missing = await service.handle('Something else');
+    expect(missing!.prayerChoices, hasLength(2));
+    expect(missing.prayerChoices.last.isRoutine, isTrue);
   });
 
   test('editing replaces text without asking for a new name', () async {
@@ -98,6 +138,16 @@ void main() {
     final result = await service.handle('New prayer text');
     expect(result!.spokenResponse, 'I updated Grace.');
     expect(store.values.single.name, 'Grace');
-    expect(store.values.single.text, 'New prayer text');
+    expect(store.values.single.text, 'New prayer text.');
+  });
+
+  test('normalizes dictated prayer punctuation before saving', () async {
+    final store = MemoryPrayerStore();
+    final service = PrayerConversationService(store)..beginRecording();
+
+    await service.handle('lord hear me, guide my family');
+    await service.handle('Evening prayer');
+
+    expect(store.values.single.text, 'Lord hear me, guide my family.');
   });
 }

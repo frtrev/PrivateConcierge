@@ -14,11 +14,13 @@ class PrivacyScreen extends StatelessWidget {
     required this.profileService,
     required this.speechVoices,
     required this.localAi,
+    required this.prayerStore,
   });
   final PrivateDataStore privateData;
   final UserProfileService profileService;
   final SpeechVoiceService speechVoices;
   final DevelopmentLocalAiService localAi;
+  final PrayerStore prayerStore;
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Settings')),
@@ -39,6 +41,7 @@ class PrivacyScreen extends StatelessWidget {
                 initialProfile: profileService.load(),
                 editing: true,
                 speechVoices: speechVoices,
+                prayerStore: prayerStore,
                 onComplete: (profile) async {
                   await profileService.save(profile);
                   if (context.mounted) Navigator.pop(context);

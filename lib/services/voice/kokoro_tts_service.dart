@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
@@ -28,27 +29,74 @@ class KokoroStatus {
 }
 
 class KokoroVoice {
-  const KokoroVoice(this.id, this.name, this.sid);
+  const KokoroVoice(this.id, this.name, this.sid, this.locale, this.language);
   final String id;
   final String name;
   final int sid;
+  final String locale;
+  final String language;
 }
 
 class KokoroTtsService {
   KokoroTtsService();
 
-  static const modelVersion = 'kokoro-int8-multi-lang-v1_1';
-  static const downloadBytes = 147031220;
-  static const installedBytes = 215000000;
+  static const modelVersion = 'kokoro-multi-lang-v1_0';
+  static const downloadBytes = 349418188;
+  static const installedBytes = 736000000;
   static const downloadUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
       '$modelVersion.tar.bz2';
   static const sha256Digest =
-      'a1e94694776049035c4f2c6529f003aaece993c76aae9a78995831c3c4dcafc6';
+      'c133d26353d776da730870dac7da07dbfc9a5e3bc80cc5e8e83ab6e823be7046';
   static const voices = [
-    KokoroVoice('kokoro:af_maple', 'Kokoro Maple', 0),
-    KokoroVoice('kokoro:af_sol', 'Kokoro Sol', 1),
-    KokoroVoice('kokoro:bf_vale', 'Kokoro Vale', 2),
+    KokoroVoice('kokoro:v1_0:af_alloy', 'Alloy', 0, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_aoede', 'Aoede', 1, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_bella', 'Bella', 2, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_heart', 'Heart', 3, 'English (US)', 'en-us'),
+    KokoroVoice(
+      'kokoro:v1_0:af_jessica',
+      'Jessica',
+      4,
+      'English (US)',
+      'en-us',
+    ),
+    KokoroVoice('kokoro:v1_0:af_kore', 'Kore', 5, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_nicole', 'Nicole', 6, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_nova', 'Nova', 7, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_river', 'River', 8, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_sarah', 'Sarah', 9, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:af_sky', 'Sky', 10, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_adam', 'Adam', 11, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_echo', 'Echo', 12, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_eric', 'Eric', 13, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_fenrir', 'Fenrir', 14, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_liam', 'Liam', 15, 'English (US)', 'en-us'),
+    KokoroVoice(
+      'kokoro:v1_0:am_michael',
+      'Michael',
+      16,
+      'English (US)',
+      'en-us',
+    ),
+    KokoroVoice('kokoro:v1_0:am_onyx', 'Onyx', 17, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_puck', 'Puck', 18, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:am_santa', 'Santa', 19, 'English (US)', 'en-us'),
+    KokoroVoice('kokoro:v1_0:bf_alice', 'Alice', 20, 'English (UK)', 'en-gb'),
+    KokoroVoice('kokoro:v1_0:bf_emma', 'Emma', 21, 'English (UK)', 'en-gb'),
+    KokoroVoice(
+      'kokoro:v1_0:bf_isabella',
+      'Isabella',
+      22,
+      'English (UK)',
+      'en-gb',
+    ),
+    KokoroVoice('kokoro:v1_0:bf_lily', 'Lily', 23, 'English (UK)', 'en-gb'),
+    KokoroVoice('kokoro:v1_0:bm_daniel', 'Daniel', 24, 'English (UK)', 'en-gb'),
+    KokoroVoice('kokoro:v1_0:bm_fable', 'Fable', 25, 'English (UK)', 'en-gb'),
+    KokoroVoice('kokoro:v1_0:bm_george', 'George', 26, 'English (UK)', 'en-gb'),
+    KokoroVoice('kokoro:v1_0:bm_lewis', 'Lewis', 27, 'English (UK)', 'en-gb'),
+    KokoroVoice('kokoro:v1_0:ef_dora', 'Dora', 28, 'Spanish', 'es'),
+    KokoroVoice('kokoro:v1_0:em_alex', 'Alex', 29, 'Spanish', 'es'),
   ];
 
   final status = ValueNotifier<KokoroStatus>(
@@ -56,11 +104,15 @@ class KokoroTtsService {
   );
   final AudioPlayer _player = AudioPlayer();
   Future<void> _queue = Future.value();
+  Completer<void>? _activePlaybackStopped;
+  int _stopGeneration = 0;
   HttpClient? _client;
 
   Future<void> initialize() async {
+    final installed = await _hasRequiredFiles();
+    if (installed) await _removeLegacyModel();
     status.value = KokoroStatus(
-      state: await _hasRequiredFiles()
+      state: installed
           ? KokoroInstallState.ready
           : KokoroInstallState.notInstalled,
     );
@@ -73,9 +125,19 @@ class KokoroTtsService {
   Future<Directory> _modelDirectory() async =>
       Directory(path.join((await _baseDirectory()).path, modelVersion));
 
+  Future<Directory> _prayerAudioDirectory() async =>
+      Directory(path.join((await _baseDirectory()).path, 'prayer_audio'));
+
+  Future<void> _removeLegacyModel() async {
+    final legacy = Directory(
+      path.join((await _baseDirectory()).path, 'kokoro-int8-multi-lang-v1_1'),
+    );
+    if (legacy.existsSync()) legacy.deleteSync(recursive: true);
+  }
+
   Future<bool> _hasRequiredFiles() async {
     final root = await _modelDirectory();
-    return File(path.join(root.path, 'model.int8.onnx')).existsSync() &&
+    return File(path.join(root.path, 'model.onnx')).existsSync() &&
         File(path.join(root.path, 'voices.bin')).existsSync() &&
         File(path.join(root.path, 'tokens.txt')).existsSync() &&
         Directory(path.join(root.path, 'espeak-ng-data')).existsSync();
@@ -170,6 +232,7 @@ class KokoroTtsService {
       if (!await _hasRequiredFiles()) {
         throw const FormatException('Kokoro installation verification failed.');
       }
+      await _removeLegacyModel();
       status.value = const KokoroStatus(state: KokoroInstallState.ready);
     } catch (error, stack) {
       debugPrint('Kokoro $phase failed: $error\n$stack');
@@ -184,73 +247,204 @@ class KokoroTtsService {
     }
   }
 
-  Future<void> speak(String text, KokoroVoice voice, {bool wait = true}) {
+  Future<void> speak(
+    String text,
+    KokoroVoice voice, {
+    double speed = 1.0,
+    bool wait = true,
+  }) => _enqueueSpeech(text, voice, speed: speed, wait: wait);
+
+  Future<void> speakCachedPrayer(
+    String text,
+    KokoroVoice voice, {
+    required int prayerId,
+    required DateTime updatedAt,
+    double speed = 1.0,
+  }) async {
+    final file = await _prayerAudioFile(
+      text,
+      voice,
+      prayerId: prayerId,
+      updatedAt: updatedAt,
+      speed: speed,
+    );
+    await _enqueueSpeech(text, voice, speed: speed, persistentFile: file);
+  }
+
+  Future<void> cachePrayer(
+    String text,
+    KokoroVoice voice, {
+    required int prayerId,
+    required DateTime updatedAt,
+    double speed = 1.0,
+  }) async {
+    final file = await _prayerAudioFile(
+      text,
+      voice,
+      prayerId: prayerId,
+      updatedAt: updatedAt,
+      speed: speed,
+    );
+    await _enqueueSpeech(
+      text,
+      voice,
+      speed: speed,
+      persistentFile: file,
+      play: false,
+    );
+  }
+
+  Future<void> clearPrayerAudioCache() async {
+    final directory = await _prayerAudioDirectory();
+    if (directory.existsSync()) directory.deleteSync(recursive: true);
+  }
+
+  Future<File> _prayerAudioFile(
+    String text,
+    KokoroVoice voice, {
+    required int prayerId,
+    required DateTime updatedAt,
+    required double speed,
+  }) async {
+    final directory = await _prayerAudioDirectory()
+      ..createSync(recursive: true);
+    final signature = sha256
+        .convert(
+          utf8.encode(
+            '$prayerId|${updatedAt.microsecondsSinceEpoch}|${voice.id}|'
+            '${speed.toStringAsFixed(3)}|$text',
+          ),
+        )
+        .toString();
+    return File(path.join(directory.path, 'prayer-$prayerId-$signature.wav'));
+  }
+
+  Future<void> _enqueueSpeech(
+    String text,
+    KokoroVoice voice, {
+    required double speed,
+    bool wait = true,
+    File? persistentFile,
+    bool play = true,
+  }) {
     final completer = Completer<void>();
+    final generation = _stopGeneration;
     _queue = _queue.catchError((Object _) {}).then((_) async {
       File? wavFile;
+      final shouldDelete = persistentFile == null;
       try {
         if (!await _hasRequiredFiles()) {
           throw StateError('Download Kokoro before selecting this voice.');
         }
-        final root = await _modelDirectory();
-        final rootPath = root.path;
-        final speechText = text;
-        final speakerId = voice.sid;
-        final bytes = await _synthesizeInBackground(
-          rootPath,
-          speechText,
-          speakerId,
-        );
-        final temporary = await getTemporaryDirectory();
-        wavFile = File(
-          path.join(
-            temporary.path,
-            'kokoro-${DateTime.now().microsecondsSinceEpoch}.wav',
-          ),
-        );
-        await wavFile.writeAsBytes(bytes, flush: true);
+        wavFile = persistentFile;
+        if (wavFile == null || !wavFile.existsSync()) {
+          final root = await _modelDirectory();
+          final bytes = await _synthesizeInBackground(
+            root.path,
+            text,
+            voice.sid,
+            voice.language,
+            speed,
+          );
+          if (wavFile == null) {
+            final temporary = await getTemporaryDirectory();
+            wavFile = File(
+              path.join(
+                temporary.path,
+                'kokoro-${DateTime.now().microsecondsSinceEpoch}.wav',
+              ),
+            );
+          } else {
+            wavFile.parent.createSync(recursive: true);
+          }
+          await wavFile.writeAsBytes(bytes, flush: true);
+        }
+        if (generation != _stopGeneration) {
+          if (shouldDelete && wavFile.existsSync()) wavFile.deleteSync();
+          completer.complete();
+          return;
+        }
+        if (!play) {
+          completer.complete();
+          return;
+        }
         await _player.stop();
+        await _player.setAudioContext(
+          AudioContextConfig(
+            route: AudioContextConfigRoute.speaker,
+            focus: AudioContextConfigFocus.gain,
+          ).build(),
+        );
         final finished = _player.onPlayerComplete.first;
+        final stopped = Completer<void>();
+        _activePlaybackStopped = stopped;
         await _player.play(DeviceFileSource(wavFile.path));
+        final playbackEnded = Future.any<void>([finished, stopped.future]);
         if (wait) {
-          await finished;
-          if (wavFile.existsSync()) wavFile.deleteSync();
+          await playbackEnded;
+          if (shouldDelete && wavFile.existsSync()) wavFile.deleteSync();
         } else {
           unawaited(
-            finished.whenComplete(() {
-              if (wavFile?.existsSync() ?? false) wavFile!.deleteSync();
+            playbackEnded.whenComplete(() {
+              if (shouldDelete && (wavFile?.existsSync() ?? false)) {
+                wavFile!.deleteSync();
+              }
             }),
           );
+        }
+        if (identical(_activePlaybackStopped, stopped)) {
+          _activePlaybackStopped = null;
         }
         completer.complete();
       } catch (error, stack) {
         debugPrint('Kokoro speech failed: $error\n$stack');
-        if (wavFile?.existsSync() ?? false) wavFile!.deleteSync();
+        if (shouldDelete && (wavFile?.existsSync() ?? false)) {
+          wavFile!.deleteSync();
+        }
         completer.completeError(error, stack);
       }
     });
     return completer.future;
   }
 
+  Future<void> pause() => _player.pause();
+
+  Future<void> resume() => _player.resume();
+
+  Future<void> stop() async {
+    _stopGeneration++;
+    final stopped = _activePlaybackStopped;
+    if (stopped != null && !stopped.isCompleted) stopped.complete();
+    await _player.stop();
+  }
+
   static Future<Uint8List> _synthesizeInBackground(
     String root,
     String text,
     int sid,
-  ) => Isolate.run(() => _synthesizeWav(root, text, sid));
+    String language,
+    double speed,
+  ) => Isolate.run(() => _synthesizeWav(root, text, sid, language, speed));
 
-  static Uint8List _synthesizeWav(String root, String text, int sid) {
+  static Uint8List _synthesizeWav(
+    String root,
+    String text,
+    int sid,
+    String language,
+    double speed,
+  ) {
     sherpa.initBindings();
     final tts = sherpa.OfflineTts(
       sherpa.OfflineTtsConfig(
         model: sherpa.OfflineTtsModelConfig(
           kokoro: sherpa.OfflineTtsKokoroModelConfig(
-            model: path.join(root, 'model.int8.onnx'),
+            model: path.join(root, 'model.onnx'),
             voices: path.join(root, 'voices.bin'),
             tokens: path.join(root, 'tokens.txt'),
             dataDir: path.join(root, 'espeak-ng-data'),
             lexicon:
                 '${path.join(root, 'lexicon-us-en.txt')},${path.join(root, 'lexicon-zh.txt')}',
-            lang: 'en-us',
+            lang: language,
           ),
           numThreads: 2,
           debug: false,
@@ -260,7 +454,7 @@ class KokoroTtsService {
       ),
     );
     try {
-      final audio = tts.generate(text: text, sid: sid, speed: 1.0);
+      final audio = tts.generate(text: text, sid: sid, speed: speed);
       if (audio.samples.isEmpty || audio.sampleRate <= 0) {
         throw StateError('Kokoro did not generate audio.');
       }
@@ -307,6 +501,7 @@ class KokoroTtsService {
 
   Future<void> dispose() async {
     _client?.close(force: true);
+    await stop();
     await _player.dispose();
     status.dispose();
   }

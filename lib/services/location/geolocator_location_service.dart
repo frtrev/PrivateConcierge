@@ -26,7 +26,7 @@ class GeolocatorLocationService implements LocationService {
         accuracy: LocationAccuracy.medium,
       ),
     );
-    return Coordinates(value.latitude, value.longitude);
+    return _coordinates(value);
   }
 
   @override
@@ -70,8 +70,15 @@ class GeolocatorLocationService implements LocationService {
     }
     return Geolocator.getPositionStream(
       locationSettings: settings,
-    ).map((position) => Coordinates(position.latitude, position.longitude));
+    ).map(_coordinates);
   }
+
+  Coordinates _coordinates(Position position) => Coordinates(
+    position.latitude,
+    position.longitude,
+    horizontalAccuracyMeters: position.accuracy,
+    reportedSpeedMetersPerSecond: position.speed >= 0 ? position.speed : null,
+  );
 
   @override
   Stream<LocationVisit> visitEvents() {

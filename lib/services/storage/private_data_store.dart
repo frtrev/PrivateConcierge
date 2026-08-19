@@ -20,7 +20,7 @@ abstract interface class PrayerStore {
   Future<PrayerRoutine> savePrayerRoutine({
     int? id,
     required String name,
-    required List<int> prayerIds,
+    required List<PrayerRoutineStep> steps,
   });
   Future<void> deletePrayerRoutine(int id);
 }
@@ -71,7 +71,7 @@ class SqlitePrivateDataStore
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 10,
+      version: 11,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -100,6 +100,9 @@ class SqlitePrivateDataStore
         }
         if (oldVersion < 9) await _createParkingEventsTable(db);
         if (oldVersion < 10) await _createPrayerTables(db);
+        if (oldVersion >= 10 && oldVersion < 11) {
+          await _migratePrayerRoutinesToV11(db);
+        }
       },
     );
   }
@@ -620,7 +623,7 @@ class SqlitePrivateDataStore
     await db.transaction((txn) async {
       await txn.delete(
         'prayer_routine_items',
-        where: 'prayer_id = ?',
+        where: "item_type = 'prayer' AND item_id = ?",
         whereArgs: [id],
       );
       await txn.delete('prayers', where: 'id = ?', whereArgs: [id]);
@@ -637,6 +640,9 @@ class SqlitePrivateDataStore
     final allPrayers = {
       for (final prayer in await prayers()) prayer.id: prayer,
     };
+    final routineNames = {
+      for (final row in routines) row['id']! as int: row['name']! as String,
+    };
     final result = <PrayerRoutine>[];
     for (final row in routines) {
       final items = await db.query(
@@ -649,10 +655,28 @@ class SqlitePrivateDataStore
         PrayerRoutine(
           id: row['id']! as int,
           name: row['name']! as String,
-          prayers: items
-              .map((item) => allPrayers[item['prayer_id']! as int])
-              .whereType<Prayer>()
-              .toList(growable: false),
+          steps: items
+              .map((item) {
+                final type = item['item_type']! as String;
+                final referenceId = item['item_id']! as int;
+                final prayer = type == 'prayer'
+                    ? allPrayers[referenceId]
+                    : null;
+                return PrayerRoutineStep(
+                  type: type == 'routine'
+                      ? PrayerRoutineStepType.routine
+                      : PrayerRoutineStepType.prayer,
+                  referenceId: referenceId,
+                  name:
+                      prayer?.name ??
+                      routineNames[referenceId] ??
+                      'Missing item',
+                  repeatCount: item['repeat_count']! as int,
+                  prayer: prayer,
+                );
+              })
+              .where((step) => step.name != 'Missing item')
+              .toList(),
           createdAt: DateTime.fromMillisecondsSinceEpoch(
             row['created_ms']! as int,
           ),
@@ -666,7 +690,7 @@ class SqlitePrivateDataStore
   Future<PrayerRoutine> savePrayerRoutine({
     int? id,
     required String name,
-    required List<int> prayerIds,
+    required List<PrayerRoutineStep> steps,
   }) async {
     final db = _database ?? (throw StateError('Private database is not open'));
     late int routineId;
@@ -690,10 +714,13 @@ class SqlitePrivateDataStore
           whereArgs: [id],
         );
       }
-      for (var index = 0; index < prayerIds.length; index++) {
+      for (var index = 0; index < steps.length; index++) {
+        final step = steps[index];
         await txn.insert('prayer_routine_items', {
           'routine_id': routineId,
-          'prayer_id': prayerIds[index],
+          'item_type': step.type.name,
+          'item_id': step.referenceId,
+          'repeat_count': step.repeatCount.clamp(1, 100),
           'position': index,
         });
       }
@@ -709,8 +736,8 @@ class SqlitePrivateDataStore
     await db.transaction((txn) async {
       await txn.delete(
         'prayer_routine_items',
-        where: 'routine_id = ?',
-        whereArgs: [id],
+        where: "routine_id = ? OR (item_type = 'routine' AND item_id = ?)",
+        whereArgs: [id, id],
       );
       await txn.delete('prayer_routines', where: 'id = ?', whereArgs: [id]);
     });
@@ -748,8 +775,21 @@ class SqlitePrivateDataStore
       'CREATE TABLE prayer_routines (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_ms INTEGER NOT NULL)',
     );
     await db.execute(
-      'CREATE TABLE prayer_routine_items (routine_id INTEGER NOT NULL, prayer_id INTEGER NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (routine_id, prayer_id))',
+      "CREATE TABLE prayer_routine_items (id INTEGER PRIMARY KEY AUTOINCREMENT, routine_id INTEGER NOT NULL, item_type TEXT NOT NULL CHECK(item_type IN ('prayer', 'routine')), item_id INTEGER NOT NULL, repeat_count INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL)",
     );
+  }
+
+  static Future<void> _migratePrayerRoutinesToV11(Database db) async {
+    await db.execute(
+      'ALTER TABLE prayer_routine_items RENAME TO prayer_routine_items_v10',
+    );
+    await db.execute(
+      "CREATE TABLE prayer_routine_items (id INTEGER PRIMARY KEY AUTOINCREMENT, routine_id INTEGER NOT NULL, item_type TEXT NOT NULL CHECK(item_type IN ('prayer', 'routine')), item_id INTEGER NOT NULL, repeat_count INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL)",
+    );
+    await db.execute(
+      "INSERT INTO prayer_routine_items (routine_id, item_type, item_id, repeat_count, position) SELECT routine_id, 'prayer', prayer_id, 1, position FROM prayer_routine_items_v10",
+    );
+    await db.execute('DROP TABLE prayer_routine_items_v10');
   }
 
   Prayer _prayerFromRow(Map<String, Object?> row) => Prayer(

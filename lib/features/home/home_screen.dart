@@ -419,6 +419,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   profileService: widget.dependencies.profileService,
                   speechVoices: widget.dependencies.speechVoices,
                   localAi: widget.dependencies.localAi,
+                  prayerStore: widget.dependencies.prayers,
                 ),
               ),
             ),

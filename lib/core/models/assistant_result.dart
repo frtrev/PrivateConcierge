@@ -160,10 +160,19 @@ class AssistantResult {
 }
 
 class PrayerChoice {
-  const PrayerChoice({required this.id, required this.name});
+  const PrayerChoice({
+    required this.id,
+    required this.name,
+    this.isRoutine = false,
+  });
   final int id;
   final String name;
-  Map<String, Object?> toMap() => {'id': id, 'name': name};
+  final bool isRoutine;
+  Map<String, Object?> toMap() => {
+    'id': id,
+    'name': name,
+    'isRoutine': isRoutine,
+  };
 }
 
 class AssistantPlatformCapabilities {
