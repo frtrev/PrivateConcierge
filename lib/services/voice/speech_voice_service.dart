@@ -139,12 +139,18 @@ class SpeechVoiceService {
   Future<void> speak(
     String text, {
     SpeechPurpose purpose = SpeechPurpose.regular,
+    VoidCallback? onKokoroStarted,
   }) async {
     final rate = rateFor(purpose);
     final selected = await selectedVoiceId();
     final kokoroVoice = _kokoroVoice(selected);
     if (kokoroVoice != null) {
-      await kokoro.speak(text, kokoroVoice, speed: rate);
+      await kokoro.speak(
+        text,
+        kokoroVoice,
+        speed: rate,
+        onStarted: onKokoroStarted,
+      );
       return;
     }
     await _channel.invokeMethod<void>('speak', {'text': text, 'rate': rate});

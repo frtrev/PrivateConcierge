@@ -22,6 +22,7 @@ import Network
   private var carVoiceTurnActive = false
   private var carVoiceBackgroundTask: UIBackgroundTaskIdentifier = .invalid
   private var carVoiceTimeout: DispatchWorkItem?
+  private var carSpeechAwaitingStart = false
 
   override func application(
     _ application: UIApplication,
@@ -154,6 +155,23 @@ import Network
         result(true)
         return
       }
+      if call.method == "prayerPlaybackState",
+        let payload = call.arguments as? [String: Any]
+      {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.updatePrayerPlayback(payload)
+        }
+        result(true)
+        return
+      }
+      if call.method == "responseAudioStarted" {
+        self?.carSpeechAwaitingStart = false
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.responseAudioStarted()
+        }
+        result(true)
+        return
+      }
       guard call.method == "consumeTalkRequest" else {
         result(FlutterMethodNotImplemented)
         return
@@ -239,9 +257,22 @@ import Network
         AVSpeechUtteranceDefaultSpeechRate * Float(rateMultiplier)
       )
     )
-    utterance.preUtteranceDelay = 0.2
+    // Give Bluetooth and CarPlay enough preroll after the session changes to
+    // playback; shorter delays can clip the first word.
+    utterance.preUtteranceDelay = 0.45
     previewSpeechSynthesizer.speak(utterance)
     return utterance
+  }
+
+  func speechSynthesizer(
+    _ synthesizer: AVSpeechSynthesizer,
+    didStart utterance: AVSpeechUtterance
+  ) {
+    guard utterance === pendingPhoneUtterance, carSpeechAwaitingStart else { return }
+    carSpeechAwaitingStart = false
+    if #available(iOS 14.0, *) {
+      CarPlaySessionCoordinator.shared.responseAudioStarted()
+    }
   }
 
   func speechSynthesizer(
@@ -299,7 +330,14 @@ import Network
     if #available(iOS 14.0, *) {
       CarPlaySessionCoordinator.shared.showStarting()
     }
-    speechHandler.listenFromCar { [weak self] text, error in
+    let capturePrayerText: Bool
+    if #available(iOS 14.0, *) {
+      capturePrayerText = CarPlaySessionCoordinator.shared.shouldCapturePrayerText
+    } else {
+      capturePrayerText = false
+    }
+    speechHandler.listenFromCar(punctuatePauses: capturePrayerText) {
+      [weak self] text, error in
       guard let self else { return }
       if let error {
         if #available(iOS 14.0, *) {
@@ -333,6 +371,24 @@ import Network
         }
       }
     }
+  }
+
+  func speakCarResponse(_ text: String, completion: @escaping (Bool) -> Void) {
+    guard let carChannel else { completion(false); return }
+    carSpeechAwaitingStart = true
+    carChannel.invokeMethod("speakCarResponse", arguments: text) { value in
+      self.carSpeechAwaitingStart = false
+      completion((value as? Bool) == true)
+    }
+  }
+
+  func playCarPrayer(_ prayer: [String: Any], completion: @escaping () -> Void) {
+    guard let carChannel else { completion(); return }
+    carChannel.invokeMethod("playCarPrayer", arguments: prayer) { _ in completion() }
+  }
+
+  func controlCarPrayer(_ method: String) {
+    carChannel?.invokeMethod(method, arguments: nil)
   }
 
   private func beginCarVoiceTurn() {
@@ -477,7 +533,10 @@ private final class IosOnDeviceSpeechHandler: NSObject {
     }
   }
 
-  func listenFromCar(completion: @escaping (String?, String?) -> Void) {
+  func listenFromCar(
+    punctuatePauses: Bool,
+    completion: @escaping (String?, String?) -> Void
+  ) {
     authorizeAndListen(result: { value in
       if let text = value as? String {
         completion(text, nil)
@@ -486,7 +545,7 @@ private final class IosOnDeviceSpeechHandler: NSObject {
       } else {
         completion(nil, "Voice recognition failed.")
       }
-    }, punctuatePauses: false)
+    }, punctuatePauses: punctuatePauses)
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

@@ -43,6 +43,7 @@ class KokoroTtsService {
   static const modelVersion = 'kokoro-multi-lang-v1_0';
   static const downloadBytes = 349418188;
   static const installedBytes = 736000000;
+  static const prayerAudioFormatVersion = 2;
   static const downloadUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
       '$modelVersion.tar.bz2';
@@ -252,7 +253,14 @@ class KokoroTtsService {
     KokoroVoice voice, {
     double speed = 1.0,
     bool wait = true,
-  }) => _enqueueSpeech(text, voice, speed: speed, wait: wait);
+    VoidCallback? onStarted,
+  }) => _enqueueSpeech(
+    text,
+    voice,
+    speed: speed,
+    wait: wait,
+    onStarted: onStarted,
+  );
 
   Future<void> speakCachedPrayer(
     String text,
@@ -311,7 +319,8 @@ class KokoroTtsService {
     final signature = sha256
         .convert(
           utf8.encode(
-            '$prayerId|${updatedAt.microsecondsSinceEpoch}|${voice.id}|'
+            '$prayerAudioFormatVersion|$prayerId|'
+            '${updatedAt.microsecondsSinceEpoch}|${voice.id}|'
             '${speed.toStringAsFixed(3)}|$text',
           ),
         )
@@ -326,6 +335,7 @@ class KokoroTtsService {
     bool wait = true,
     File? persistentFile,
     bool play = true,
+    VoidCallback? onStarted,
   }) {
     final completer = Completer<void>();
     final generation = _stopGeneration;
@@ -371,14 +381,27 @@ class KokoroTtsService {
         await _player.stop();
         await _player.setAudioContext(
           AudioContextConfig(
-            route: AudioContextConfigRoute.speaker,
-            focus: AudioContextConfigFocus.gain,
+            // Keep Kokoro output-only on iOS. Forcing `speaker` maps to an
+            // AVAudioSession play-and-record category, which can preserve the
+            // receiver route after speech recognition. The system route uses
+            // playback instead, so speaker, Bluetooth, CarPlay, and AirPlay
+            // follow the output currently selected by iOS just like native
+            // text to speech.
+            route: AudioContextConfigRoute.system,
+            focus: AudioContextConfigFocus.duckOthers,
           ).build(),
         );
+        // Bluetooth and CarPlay can report the new route before their output
+        // pipeline is ready. A short preroll after activating playback keeps
+        // the first phonemes from being swallowed.
+        if (Platform.isIOS) {
+          await Future<void>.delayed(const Duration(milliseconds: 350));
+        }
         final finished = _player.onPlayerComplete.first;
         final stopped = Completer<void>();
         _activePlaybackStopped = stopped;
         await _player.play(DeviceFileSource(wavFile.path));
+        onStarted?.call();
         final playbackEnded = Future.any<void>([finished, stopped.future]);
         if (wait) {
           await playbackEnded;
@@ -442,15 +465,21 @@ class KokoroTtsService {
             voices: path.join(root, 'voices.bin'),
             tokens: path.join(root, 'tokens.txt'),
             dataDir: path.join(root, 'espeak-ng-data'),
-            lexicon:
-                '${path.join(root, 'lexicon-us-en.txt')},${path.join(root, 'lexicon-zh.txt')}',
+            lexicon: switch (language) {
+              'en-us' => path.join(root, 'lexicon-us-en.txt'),
+              'en-gb' => path.join(root, 'lexicon-gb-en.txt'),
+              _ => '',
+            },
             lang: language,
           ),
           numThreads: 2,
           debug: false,
         ),
-        ruleFsts:
-            '${path.join(root, 'phone-zh.fst')},${path.join(root, 'date-zh.fst')},${path.join(root, 'number-zh.fst')}',
+        // This package only ships Chinese phone/date/number normalization
+        // rules. Applying them to an English or Spanish voice changes digits
+        // into Chinese tokens, so let espeak-ng normalize numbers in the
+        // selected voice language instead.
+        ruleFsts: '',
       ),
     );
     try {

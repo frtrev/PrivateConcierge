@@ -76,6 +76,18 @@ class PrivacyScreen extends StatelessWidget {
           title: Text('Location uploaded to our servers'),
           subtitle: Text('Never'),
         ),
+        ListTile(
+          leading: const Icon(Icons.privacy_tip_outlined),
+          title: const Text('Privacy policy'),
+          subtitle: const Text('How on-device data and downloads are handled'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => const _PrivacyPolicyScreen(),
+            ),
+          ),
+        ),
         const ListTile(
           leading: Icon(Icons.public_outlined),
           title: Text('Offline places data'),
@@ -169,4 +181,88 @@ class PrivacyScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PrivacyPolicyScreen extends StatelessWidget {
+  const _PrivacyPolicyScreen();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Privacy policy')),
+    body: ListView(
+      padding: const EdgeInsets.all(20),
+      children: const [
+        Text(
+          'Private Concierge Privacy Policy',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 4),
+        Text('Effective August 18, 2026'),
+        SizedBox(height: 20),
+        Text(
+          'Private Concierge is designed to process personal information on '
+          'your device. It has no user account, advertising SDK, analytics '
+          'SDK, or Private Concierge personal-data server.',
+        ),
+        SizedBox(height: 16),
+        Text('Information kept on your device', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Your assistant profile, preferences, saved places, visit history, '
+          'prayers, prayer routines, saved prayer transcripts, downloaded map data, '
+          'downloaded AI models, and generated prayer audio are stored in the '
+          "app's private storage. Microphone recordings are not retained after "
+          'speech recognition finishes.',
+        ),
+        SizedBox(height: 16),
+        Text('Network connections', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'The app connects to public hosts only to discover and download '
+          'Overture Maps coverage and optional AI or speech models. Those '
+          'hosts receive ordinary network information such as your IP address '
+          'and the requested files or byte ranges. Map download requests can '
+          'indicate the general coverage area selected for offline use, but '
+          'the app does not send your visit history, saved prayers, profile, '
+          'or raw travel history to them. Apple system services may process '
+          'requests such as reverse geocoding under Apple’s own privacy terms.',
+        ),
+        SizedBox(height: 16),
+        Text('Permissions', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Location permission enables nearby-place lookup and private visit '
+          'recognition, including in the background when you grant Always '
+          'access. Microphone and speech-recognition permissions enable spoken '
+          'assistant requests and prayer dictation. You can revoke these '
+          'permissions at any time in iOS Settings.',
+        ),
+        SizedBox(height: 16),
+        Text('Retention and deletion', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Personal information remains on your device until you delete it. '
+          'The Settings screen lets you delete visit history, custom places, '
+          'or the private database containing visits and prayers. Your profile '
+          'and voice preferences can be changed in Settings. Optional '
+          'downloaded models can be removed from their settings. Deleting the '
+          'app removes its remaining private app storage.',
+        ),
+        SizedBox(height: 16),
+        Text('Sharing and tracking', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Private Concierge does not sell personal information, share it with '
+          'advertisers or data brokers, or track you across other companies’ '
+          'apps and websites.',
+        ),
+        SizedBox(height: 24),
+      ],
+    ),
+  );
+
+  static const _policyHeading = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w600,
+  );
 }

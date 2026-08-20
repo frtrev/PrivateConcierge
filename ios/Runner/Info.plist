@@ -35,6 +35,8 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location selects offline coverage and recognizes nearby public or private places entirely on this device.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

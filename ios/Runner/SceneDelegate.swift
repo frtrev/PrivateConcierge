@@ -99,6 +99,14 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   private var pendingRootTemplate: CPTemplate?
   private var pendingAlerts: [PendingAlert] = []
   private var presentingAlert = false
+  private var activePrayer: [String: Any]?
+  private var pendingAutomaticPrayer: [String: Any]?
+  private var prayerPaused = false
+  private(set) var shouldCapturePrayerText = false
+  private var processingTimer: Timer?
+  private weak var processingItem: CPListItem?
+  private var processingPhase = 0
+  private var responseAudioHasStarted = false
   private let alertLifetime: TimeInterval = 5 * 60
 
   private override init() {
@@ -124,6 +132,8 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     carPlayScene = nil
     homeTemplate = nil
     presentingAlert = false
+    stopProcessingAnimation()
+    stopPrayer()
   }
 
   func showListening() {
@@ -142,10 +152,11 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   }
 
   func showThinking(transcript: String) {
-    showMessage("Thinking…", detail: "You said: \(transcript)")
+    startProcessingAnimation(transcript: transcript)
   }
 
   func showRecognitionError(_ message: String) {
+    stopProcessingAnimation()
     showMessage("Charon couldn't listen", detail: message, showBack: true)
   }
 
@@ -228,6 +239,8 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   }
 
   func showHome() {
+    stopProcessingAnimation()
+    stopPrayer()
     guard let homeTemplate else { return }
     latestPayload = nil
     setRootTemplate(homeTemplate, animated: true)
@@ -269,10 +282,21 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
       ?? "Charon finished the request."
     let places = payload["places"] as? [[String: Any]] ?? []
     let isNavigation = payload["type"] as? String == "navigation"
-    listenAfterSpeech = response.trimmingCharacters(in: .whitespacesAndNewlines)
-      .hasSuffix("?")
-    speechSynthesizer.stopSpeaking(at: .immediate)
+    responseAudioHasStarted = false
+    shouldCapturePrayerText = payload["capturePrayerText"] as? Bool ?? false
+    let prayerChoices = payload["prayerChoices"] as? [[String: Any]] ?? []
+    let context = payload["context"] as? [String: Any]
+    if context?["lastIntent"] as? String == "playPrayer", prayerChoices.count == 1 {
+      var automaticPrayer = prayerChoices[0]
+      automaticPrayer["announce"] = false
+      pendingAutomaticPrayer = automaticPrayer
+    } else {
+      pendingAutomaticPrayer = nil
+    }
+    listenAfterSpeech = shouldCapturePrayerText || response
+      .trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?")
     if isNavigation {
+      stopProcessingAnimation()
       listenAfterSpeech = false
       releaseResponseAudioRoute()
       if let place = places.first {
@@ -280,21 +304,22 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
           self?.navigate(to: place)
         }
       }
+      renderLatestResult()
     } else {
-      prepareResponseAudioRoute()
       CarAudioCuePlayer.shared.playResponseCue { [weak self] in
         // CarPlay/HFP needs a moment after acquiring the route. Without this
         // guard interval, the head unit can clip the first spoken words.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
           guard let self else { return }
-          let utterance = AVSpeechUtterance(string: response)
-          if let voiceId = UserDefaults.standard.string(
-            forKey: "charon.speechVoiceId"
-          ) {
-            utterance.voice = AVSpeechSynthesisVoice(identifier: voiceId)
+          (UIApplication.shared.delegate as? AppDelegate)?.speakCarResponse(response) {
+            [weak self] succeeded in
+            guard let self else { return }
+            if !succeeded && !self.responseAudioHasStarted {
+              self.stopProcessingAnimation()
+              self.renderLatestResult()
+            }
+            self.responseSpeechFinished()
           }
-          utterance.preUtteranceDelay = 0.15
-          self.speechSynthesizer.speak(utterance)
         }
       }
     }
@@ -308,8 +333,140 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
         UIApplication.shared.open(url)
       }
     }
-    let list = CPListSection(items: resultItems(response: response, places: places))
-    let template = CPListTemplate(title: "Private Concierge", sections: [list])
+  }
+
+  func responseAudioStarted() {
+    guard !responseAudioHasStarted else { return }
+    responseAudioHasStarted = true
+    stopProcessingAnimation()
+    renderLatestResult()
+  }
+
+  private func startProcessingAnimation(transcript: String) {
+    stopProcessingAnimation()
+    processingPhase = 0
+    let item = CPListItem(
+      text: "Thinking, please wait…",
+      detailText: processingDetail(transcript: transcript)
+    )
+    if #available(iOS 15.0, *) { item.isEnabled = false }
+    else { item.handler = { _, completion in completion() } }
+    processingItem = item
+    setRootTemplate(
+      CPListTemplate(
+        title: "Private Concierge",
+        sections: [CPListSection(items: [item])]
+      ),
+      animated: true
+    )
+    processingTimer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) {
+      [weak self] _ in
+      guard let self, let item = self.processingItem else { return }
+      self.processingPhase = (self.processingPhase + 1) % 4
+      item.setDetailText(self.processingDetail(transcript: transcript))
+    }
+  }
+
+  private func processingDetail(transcript: String) -> String {
+    let pulse = ["●  ○  ○", "○  ●  ○", "○  ○  ●", "○  ●  ○"][processingPhase]
+    return "\(pulse)\nYou said: \(transcript)"
+  }
+
+  private func stopProcessingAnimation() {
+    processingTimer?.invalidate()
+    processingTimer = nil
+    processingItem = nil
+    processingPhase = 0
+  }
+
+  private func responseSpeechFinished() {
+    if let prayer = pendingAutomaticPrayer {
+      pendingAutomaticPrayer = nil
+      playPrayer(prayer)
+      return
+    }
+    guard listenAfterSpeech else { return }
+    listenAfterSpeech = false
+    showMessage("Your turn…", detail: "Charon will listen after the tone.")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+      (UIApplication.shared.delegate as? AppDelegate)?.requestTalkFromCar()
+    }
+  }
+
+  func updatePrayerPlayback(_ payload: [String: Any]) {
+    let state = payload["state"] as? String ?? ""
+    if payload["id"] != nil { activePrayer = payload }
+    prayerPaused = state == "paused"
+    if state == "stopped" || state == "completed" {
+      activePrayer = nil
+      prayerPaused = false
+    }
+    renderPrayerPlayback(state: state)
+  }
+
+  private func playPrayer(_ prayer: [String: Any]) {
+    activePrayer = prayer
+    prayerPaused = false
+    renderPrayerPlayback(state: "playing")
+    (UIApplication.shared.delegate as? AppDelegate)?.playCarPrayer(prayer) {}
+  }
+
+  private func togglePrayerPause() {
+    guard activePrayer != nil else { return }
+    prayerPaused.toggle()
+    let method = prayerPaused ? "pauseCarPrayer" : "resumeCarPrayer"
+    (UIApplication.shared.delegate as? AppDelegate)?.controlCarPrayer(method)
+    renderPrayerPlayback(state: prayerPaused ? "paused" : "playing")
+  }
+
+  private func stopPrayer() {
+    guard activePrayer != nil else { return }
+    (UIApplication.shared.delegate as? AppDelegate)?.controlCarPrayer("stopCarPrayer")
+    activePrayer = nil
+    prayerPaused = false
+  }
+
+  private func renderPrayerPlayback(state: String) {
+    guard let prayer = activePrayer else {
+      renderLatestResult()
+      return
+    }
+    let name = prayer["name"] as? String ?? "Prayer"
+    let status = CPListItem(
+      text: state == "paused" ? "Paused" : "Now praying",
+      detailText: name
+    )
+    if #available(iOS 15.0, *) { status.isEnabled = false }
+    else { status.handler = { _, completion in completion() } }
+    let pause = CPListItem(text: prayerPaused ? "Continue" : "Pause", detailText: nil)
+    pause.handler = { [weak self] _, completion in
+      self?.togglePrayerPause()
+      completion()
+    }
+    let stop = CPListItem(text: "Stop", detailText: nil)
+    stop.handler = { [weak self] _, completion in
+      self?.stopPrayer()
+      self?.renderLatestResult()
+      completion()
+    }
+    setRootTemplate(
+      CPListTemplate(
+        title: "Private Concierge",
+        sections: [CPListSection(items: [status, pause, stop])]
+      ),
+      animated: true
+    )
+  }
+
+  private func renderLatestResult() {
+    guard let latestPayload else {
+      showHome()
+      return
+    }
+    let template = CPListTemplate(
+      title: "Private Concierge",
+      sections: [CPListSection(items: resultItems(payload: latestPayload))]
+    )
     setRootTemplate(template, animated: true)
   }
 
@@ -370,15 +527,24 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     )
   }
 
-  private func resultItems(
-    response: String,
-    places: [[String: Any]]
-  ) -> [CPListItem] {
+  private func resultItems(payload: [String: Any]) -> [CPListItem] {
+    let response = payload["response"] as? String ?? "Charon finished the request."
+    let places = payload["places"] as? [[String: Any]] ?? []
     let responseItem = CPListItem(text: response, detailText: nil)
     responseItem.handler = { _, completion in completion() }
     var items = [responseItem]
+    for prayer in (payload["prayerChoices"] as? [[String: Any]] ?? []).prefix(9) {
+      let name = prayer["name"] as? String ?? "Prayer"
+      let kind = (prayer["isRoutine"] as? Bool) == true ? "Prayer routine" : "Prayer"
+      let item = CPListItem(text: name, detailText: "Play \(kind.lowercased())")
+      item.handler = { [weak self] _, completion in
+        self?.playPrayer(prayer)
+        completion()
+      }
+      items.append(item)
+    }
     // CarPlay allows twelve rows here: the response, up to ten places, and Go Back.
-    for place in places.prefix(10) {
+    for place in places.prefix(max(0, 10 - items.count)) {
       let name = place["name"] as? String ?? "Place"
       let address = place["address"] as? String ?? ""
       let distance = (place["distanceMeters"] as? NSNumber)?.doubleValue
@@ -518,17 +684,26 @@ final class CarAudioCuePlayer: NSObject, AVAudioPlayerDelegate {
         (frequency: 660, duration: 0.08),
         (frequency: 880, duration: 0.11),
       ],
+      preparePlaybackRoute: true,
       completion: completion
     )
   }
 
   private func play(
     segments: [(frequency: Double, duration: Double)],
+    preparePlaybackRoute: Bool = false,
     completion: @escaping () -> Void
   ) {
     finishPlayback()
     do {
       let session = AVAudioSession.sharedInstance()
+      if preparePlaybackRoute {
+        try? session.setCategory(
+          .playback,
+          mode: .spokenAudio,
+          options: [.duckOthers]
+        )
+      }
       if !session.isOtherAudioPlaying {
         try? session.setActive(true, options: .notifyOthersOnDeactivation)
       }

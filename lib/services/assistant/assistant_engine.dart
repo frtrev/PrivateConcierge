@@ -74,6 +74,17 @@ class AssistantEngine {
         );
       }
     }
+    // The deterministic query engine handles known place searches,
+    // navigation, and conversational follow-ups in milliseconds. Keep it on
+    // the critical path for CarPlay instead of waiting for local inference to
+    // rediscover an intent that is already understood locally.
+    final directAnswer = await queries.answer(
+      text,
+      origin: bootstrap.coordinates,
+    );
+    if (directAnswer.plan.intent != LocalQueryIntent.unknown) {
+      return _fromQuery(directAnswer);
+    }
     var enhancedText = text;
     final localResult = await localAi?.interpret(normalized);
     if (localResult != null) {
