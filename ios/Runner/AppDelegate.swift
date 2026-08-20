@@ -23,6 +23,7 @@ import Network
   private var carVoiceBackgroundTask: UIBackgroundTaskIdentifier = .invalid
   private var carVoiceTimeout: DispatchWorkItem?
   private var carSpeechAwaitingStart = false
+  private var carVoiceTurnGeneration = 0
 
   override func application(
     _ application: UIApplication,
@@ -326,7 +327,7 @@ import Network
       }
       return
     }
-    beginCarVoiceTurn()
+    let turnGeneration = beginCarVoiceTurn()
     if #available(iOS 14.0, *) {
       CarPlaySessionCoordinator.shared.showStarting()
     }
@@ -338,7 +339,10 @@ import Network
     }
     speechHandler.listenFromCar(punctuatePauses: capturePrayerText) {
       [weak self] text, error in
-      guard let self else { return }
+      guard let self,
+        self.carVoiceTurnActive,
+        self.carVoiceTurnGeneration == turnGeneration
+      else { return }
       if let error {
         if #available(iOS 14.0, *) {
           CarPlaySessionCoordinator.shared.showRecognitionError(error)
@@ -355,10 +359,14 @@ import Network
         self.endCarVoiceTurn()
         return
       }
+      self.beginCarProcessingTimeout(turnGeneration: turnGeneration)
       if #available(iOS 14.0, *) {
         CarPlaySessionCoordinator.shared.showThinking(transcript: text)
       }
       carChannel.invokeMethod("submitRecognizedText", arguments: text) { result in
+        guard self.carVoiceTurnActive,
+          self.carVoiceTurnGeneration == turnGeneration
+        else { return }
         defer { self.endCarVoiceTurn() }
         if let payload = result as? [String: Any] {
           if #available(iOS 14.0, *) {
@@ -391,41 +399,63 @@ import Network
     carChannel?.invokeMethod(method, arguments: nil)
   }
 
-  private func beginCarVoiceTurn() {
+  private func beginCarVoiceTurn() -> Int {
+    carVoiceTurnGeneration += 1
+    let turnGeneration = carVoiceTurnGeneration
     carVoiceTurnActive = true
     carVoiceBackgroundTask = UIApplication.shared.beginBackgroundTask(
       withName: "CharonCarVoiceTurn"
     ) { [weak self] in
       guard let self else { return }
-      if #available(iOS 14.0, *) {
-        CarPlaySessionCoordinator.shared.showRecognitionError(
-          "The request took too long. Please try again."
-        )
-      }
-      self.endCarVoiceTurn()
+      self.endCarVoiceBackgroundTask()
     }
+    scheduleCarVoiceTimeout(
+      after: 25,
+      turnGeneration: turnGeneration,
+      message: "Charon didn't hear a request in time. Please try again."
+    )
+    return turnGeneration
+  }
+
+  private func beginCarProcessingTimeout(turnGeneration: Int) {
+    scheduleCarVoiceTimeout(
+      after: 55,
+      turnGeneration: turnGeneration,
+      message: "Charon couldn't finish that request in time. Please try again."
+    )
+  }
+
+  private func scheduleCarVoiceTimeout(
+    after seconds: TimeInterval,
+    turnGeneration: Int,
+    message: String
+  ) {
+    carVoiceTimeout?.cancel()
     let timeout = DispatchWorkItem { [weak self] in
-      guard let self, self.carVoiceTurnActive else { return }
+      guard let self,
+        self.carVoiceTurnActive,
+        self.carVoiceTurnGeneration == turnGeneration
+      else { return }
       if #available(iOS 14.0, *) {
-        CarPlaySessionCoordinator.shared.showRecognitionError(
-          "Charon didn't receive a response in time. Please try again."
-        )
+        CarPlaySessionCoordinator.shared.showRecognitionError(message)
       }
       self.endCarVoiceTurn()
     }
     carVoiceTimeout = timeout
-    DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: timeout)
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: timeout)
   }
 
   private func endCarVoiceTurn() {
     carVoiceTimeout?.cancel()
     carVoiceTimeout = nil
     carVoiceTurnActive = false
+    endCarVoiceBackgroundTask()
+  }
+
+  private func endCarVoiceBackgroundTask() {
     let task = carVoiceBackgroundTask
     carVoiceBackgroundTask = .invalid
-    if task != .invalid {
-      UIApplication.shared.endBackgroundTask(task)
-    }
+    if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
   }
 }
 
