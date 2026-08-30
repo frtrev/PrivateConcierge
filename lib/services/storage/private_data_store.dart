@@ -10,6 +10,7 @@ import '../../core/models/visit_session.dart';
 import '../../core/models/visit_diagnostic.dart';
 import '../../core/models/parking_event.dart';
 import '../../core/models/prayer.dart';
+import '../../core/models/pending_visit_group.dart';
 
 abstract interface class PrayerStore {
   Future<Prayer> savePrayer({String? name, required String text, int? id});
@@ -58,6 +59,13 @@ abstract interface class PrivateDataStore {
   Future<int> beginVisitSession(PointOfInterest place, DateTime arrival);
   Future<void> endVisitSession(int id, DateTime departure);
   Future<List<VisitSession>> visitSessions();
+  Future<int> beginPendingVisitGroup(
+    List<PointOfInterest> candidates,
+    DateTime arrival,
+  );
+  Future<void> endPendingVisitGroup(int id, DateTime departure);
+  Future<List<PendingVisitGroup>> pendingVisitGroups();
+  Future<void> resolvePendingVisitGroup(int id, PointOfInterest place);
   Future<void> recordParking(Coordinates coordinates, DateTime at);
   Future<List<ParkingEvent>> parkingEvents();
   Future<void> deleteParkingEvents();
@@ -71,7 +79,7 @@ class SqlitePrivateDataStore
     final root = await getApplicationSupportDirectory();
     _database = await openDatabase(
       p.join(root.path, 'private_user_data.db'),
-      version: 11,
+      version: 12,
       onCreate: (db, _) async {
         await db.execute(
           'CREATE TABLE private_values (key TEXT PRIMARY KEY, value TEXT)',
@@ -83,6 +91,7 @@ class SqlitePrivateDataStore
         await _createVisitDiagnosticsTable(db);
         await _createParkingEventsTable(db);
         await _createPrayerTables(db);
+        await _createPendingVisitGroupTables(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createVisitsTable(db);
@@ -103,6 +112,7 @@ class SqlitePrivateDataStore
         if (oldVersion >= 10 && oldVersion < 11) {
           await _migratePrayerRoutinesToV11(db);
         }
+        if (oldVersion < 12) await _createPendingVisitGroupTables(db);
       },
     );
   }
@@ -303,6 +313,8 @@ class SqlitePrivateDataStore
   Future<void> deleteVisitHistory() async {
     await _database?.delete('visited_places');
     await _database?.delete('visit_sessions');
+    await _database?.delete('pending_visit_group_candidates');
+    await _database?.delete('pending_visit_groups');
   }
 
   @override
@@ -532,6 +544,147 @@ class SqlitePrivateDataStore
   }
 
   @override
+  Future<int> beginPendingVisitGroup(
+    List<PointOfInterest> candidates,
+    DateTime arrival,
+  ) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    return db.transaction((txn) async {
+      final id = await txn.insert('pending_visit_groups', {
+        'arrival_ms': arrival.millisecondsSinceEpoch,
+        'departure_ms': null,
+      });
+      for (var index = 0; index < candidates.length; index++) {
+        final place = candidates[index];
+        await txn.insert('pending_visit_group_candidates', {
+          'group_id': id,
+          'poi_id': place.id,
+          'name': place.name,
+          'category': place.category,
+          'address': place.address,
+          'latitude': place.coordinates.latitude,
+          'longitude': place.coordinates.longitude,
+          'distance_meters': place.distanceMeters,
+          'position': index,
+        });
+      }
+      return id;
+    });
+  }
+
+  @override
+  Future<void> endPendingVisitGroup(int id, DateTime departure) async {
+    await _database?.update(
+      'pending_visit_groups',
+      {'departure_ms': departure.millisecondsSinceEpoch},
+      where: 'id = ? AND departure_ms IS NULL',
+      whereArgs: [id],
+    );
+  }
+
+  @override
+  Future<List<PendingVisitGroup>> pendingVisitGroups() async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final groups = await db.query(
+      'pending_visit_groups',
+      orderBy: 'arrival_ms DESC',
+    );
+    final result = <PendingVisitGroup>[];
+    for (final group in groups) {
+      final candidates = await db.query(
+        'pending_visit_group_candidates',
+        where: 'group_id = ?',
+        whereArgs: [group['id']],
+        orderBy: 'position',
+      );
+      final places = candidates
+          .map(
+            (row) => PointOfInterest(
+              id: row['poi_id']! as String,
+              regionId: 'visit-candidate',
+              name: row['name']! as String,
+              coordinates: Coordinates(
+                (row['latitude']! as num).toDouble(),
+                (row['longitude']! as num).toDouble(),
+              ),
+              category: row['category']! as String,
+              subcategory: row['category']! as String,
+              address: row['address']! as String,
+              distanceMeters: (row['distance_meters'] as num?)?.toDouble(),
+            ),
+          )
+          .toList(growable: false);
+      String? suggestedPoiId;
+      var bestCount = 0;
+      for (final place in places) {
+        final visits = await db.query(
+          'visited_places',
+          columns: ['visit_count'],
+          where: 'poi_id = ?',
+          whereArgs: [place.id],
+          limit: 1,
+        );
+        final count = visits.isEmpty ? 0 : visits.first['visit_count']! as int;
+        if (count > bestCount) {
+          bestCount = count;
+          suggestedPoiId = place.id;
+        }
+      }
+      result.add(
+        PendingVisitGroup(
+          id: group['id']! as int,
+          candidates: places,
+          arrival: DateTime.fromMillisecondsSinceEpoch(
+            group['arrival_ms']! as int,
+          ),
+          departure: (group['departure_ms'] as int?) == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(
+                  group['departure_ms']! as int,
+                ),
+          suggestedPoiId: suggestedPoiId,
+        ),
+      );
+    }
+    return result;
+  }
+
+  @override
+  Future<void> resolvePendingVisitGroup(int id, PointOfInterest place) async {
+    final db = _database ?? (throw StateError('Private database is not open'));
+    final rows = await db.query(
+      'pending_visit_groups',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final row = rows.first;
+    final arrival = DateTime.fromMillisecondsSinceEpoch(
+      row['arrival_ms']! as int,
+    );
+    final departureMs = row['departure_ms'] as int?;
+    final departure = departureMs == null
+        ? DateTime.now()
+        : DateTime.fromMillisecondsSinceEpoch(departureMs);
+    await recordVisit(place, departure);
+    final sessionId = await beginVisitSession(place, arrival);
+    await endVisitSession(sessionId, departure);
+    await db.transaction((txn) async {
+      await txn.delete(
+        'pending_visit_group_candidates',
+        where: 'group_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete(
+        'pending_visit_groups',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  @override
   Future<void> recordParking(Coordinates coordinates, DateTime at) async {
     final db = _database ?? (throw StateError('Private database is not open'));
     await db.insert('parking_events', {
@@ -758,6 +911,15 @@ class SqlitePrivateDataStore
   static Future<void> _createVisitSessionsTable(Database db) => db.execute(
     'CREATE TABLE visit_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, poi_id TEXT NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, arrival_ms INTEGER NOT NULL, departure_ms INTEGER)',
   );
+
+  static Future<void> _createPendingVisitGroupTables(Database db) async {
+    await db.execute(
+      'CREATE TABLE pending_visit_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, arrival_ms INTEGER NOT NULL, departure_ms INTEGER)',
+    );
+    await db.execute(
+      'CREATE TABLE pending_visit_group_candidates (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL, poi_id TEXT NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, address TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, distance_meters REAL, position INTEGER NOT NULL)',
+    );
+  }
 
   static Future<void> _createVisitDiagnosticsTable(Database db) => db.execute(
     'CREATE TABLE visit_diagnostics (id INTEGER PRIMARY KEY AUTOINCREMENT, at_ms INTEGER NOT NULL, event TEXT NOT NULL, detail TEXT NOT NULL)',

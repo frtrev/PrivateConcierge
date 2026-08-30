@@ -5,6 +5,7 @@ import 'package:private_concierge/core/models/visited_place.dart';
 import 'package:private_concierge/core/models/unknown_place_candidate.dart';
 import 'package:private_concierge/core/models/visit_session.dart';
 import 'package:private_concierge/core/models/parking_event.dart';
+import 'package:private_concierge/core/models/pending_visit_group.dart';
 import 'package:private_concierge/services/location/location_service.dart';
 import 'package:private_concierge/services/storage/private_data_store.dart';
 import 'package:private_concierge/services/visits/visit_tracker.dart';
@@ -38,6 +39,7 @@ class MemoryPrivateDataStore implements PrivateDataStore {
   final sessions = <VisitSession>[];
   final parking = <ParkingEvent>[];
   final aggregate = <VisitedPlace>[];
+  final pendingGroups = <PendingVisitGroup>[];
   @override
   Future<void> open() async {}
   @override
@@ -136,6 +138,45 @@ class MemoryPrivateDataStore implements PrivateDataStore {
 
   @override
   Future<List<VisitSession>> visitSessions() async => sessions;
+  @override
+  Future<int> beginPendingVisitGroup(
+    List<PointOfInterest> candidates,
+    DateTime arrival,
+  ) async {
+    final id = pendingGroups.length + 1;
+    pendingGroups.add(
+      PendingVisitGroup(
+        id: id,
+        candidates: candidates,
+        arrival: arrival,
+        departure: null,
+      ),
+    );
+    return id;
+  }
+
+  @override
+  Future<void> endPendingVisitGroup(int id, DateTime departure) async {
+    final index = pendingGroups.indexWhere((group) => group.id == id);
+    final group = pendingGroups[index];
+    pendingGroups[index] = PendingVisitGroup(
+      id: group.id,
+      candidates: group.candidates,
+      arrival: group.arrival,
+      departure: departure,
+      suggestedPoiId: group.suggestedPoiId,
+    );
+  }
+
+  @override
+  Future<List<PendingVisitGroup>> pendingVisitGroups() async => pendingGroups;
+  @override
+  Future<void> resolvePendingVisitGroup(int id, PointOfInterest place) async {
+    final group = pendingGroups.firstWhere((value) => value.id == id);
+    await recordVisit(place, group.departure ?? DateTime.now());
+    pendingGroups.remove(group);
+  }
+
   @override
   Future<void> recordParking(Coordinates coordinates, DateTime at) async =>
       parking.add(
@@ -458,5 +499,87 @@ void main() {
 
     expect(privateData.recorded, isEmpty);
     expect(privateData.unknownStays, hasLength(1));
+  });
+
+  test('stores close detected places as a group for manual choice', () async {
+    final repository = MemoryPoiRepository()
+      ..points.addAll(const [
+        PointOfInterest(
+          id: 'coffee',
+          regionId: 'region',
+          name: 'Coffee Shop',
+          coordinates: Coordinates(35.1, -89.6),
+          category: 'restaurant',
+          subcategory: 'cafe',
+          address: '1 Main St',
+        ),
+        PointOfInterest(
+          id: 'bakery',
+          regionId: 'region',
+          name: 'Bakery',
+          coordinates: Coordinates(35.10005, -89.6),
+          category: 'restaurant',
+          subcategory: 'bakery',
+          address: '3 Main St',
+        ),
+      ]);
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      repository,
+      privateData,
+      minimumDwell: Duration.zero,
+      minimumObservations: 2,
+    );
+    final at = DateTime(2026, 8, 10, 9);
+
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+    await tracker.recordObservation(
+      const Coordinates(35.1, -89.6),
+      at.add(const Duration(seconds: 20)),
+    );
+
+    expect(privateData.recorded, isEmpty);
+    expect(
+      privateData.pendingGroups.single.candidates.map((place) => place.id),
+      ['coffee', 'bakery'],
+    );
+  });
+
+  test('offers up to five nearby places for an ambiguous visit', () async {
+    final repository = MemoryPoiRepository();
+    for (var index = 0; index < 7; index++) {
+      repository.points.add(
+        PointOfInterest(
+          id: 'place-$index',
+          regionId: 'region',
+          name: 'Place $index',
+          coordinates: Coordinates(35.1 + (index * .00001), -89.6),
+          category: 'restaurant',
+          subcategory: 'restaurant',
+          address: '$index Main St',
+        ),
+      );
+    }
+    final privateData = MemoryPrivateDataStore();
+    final tracker = VisitTracker(
+      UnusedLocationService(),
+      repository,
+      privateData,
+      minimumDwell: Duration.zero,
+      minimumObservations: 2,
+    );
+    final at = DateTime(2026, 8, 28, 18);
+
+    await tracker.recordObservation(const Coordinates(35.1, -89.6), at);
+    await tracker.recordObservation(
+      const Coordinates(35.1, -89.6),
+      at.add(const Duration(seconds: 20)),
+    );
+
+    expect(
+      privateData.pendingGroups.single.candidates.map((place) => place.id),
+      ['place-0', 'place-1', 'place-2', 'place-3', 'place-4'],
+    );
   });
 }

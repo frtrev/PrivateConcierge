@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/models/visited_place.dart';
 import '../../core/models/visit_diagnostic.dart';
 import '../../core/models/visit_session.dart';
+import '../../core/models/pending_visit_group.dart';
+import '../../core/models/poi.dart';
 import '../../services/storage/private_data_store.dart';
 import '../../services/visits/visit_tracker.dart';
 
@@ -21,17 +23,26 @@ class MostVisitedScreen extends StatefulWidget {
 }
 
 class _MostVisitedScreenState extends State<MostVisitedScreen> {
-  late Future<List<VisitedPlace>> places;
+  late Future<_MostVisitedData> data;
   late Future<bool> backgroundEnabled;
 
   @override
   void initState() {
     super.initState();
-    places = widget.privateData.mostVisited();
+    data = _loadData();
     backgroundEnabled = widget.visitTracker.backgroundTrackingEnabled;
   }
 
-  void _refresh() => setState(() => places = widget.privateData.mostVisited());
+  Future<_MostVisitedData> _loadData() async => _MostVisitedData(
+    places: await widget.privateData.mostVisited(),
+    pendingGroups: await widget.privateData.pendingVisitGroups(),
+  );
+
+  Future<void> _refresh() async {
+    final refreshed = _loadData();
+    setState(() => data = refreshed);
+    await refreshed;
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -47,11 +58,12 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
       ],
     ),
     body: RefreshIndicator(
-      onRefresh: () async => _refresh(),
-      child: FutureBuilder<List<VisitedPlace>>(
-        future: places,
+      onRefresh: _refresh,
+      child: FutureBuilder<_MostVisitedData>(
+        future: data,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
+          if (snapshot.connectionState != ConnectionState.done &&
+              !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
@@ -67,8 +79,10 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
               ],
             );
           }
-          final values = snapshot.data ?? [];
-          if (values.isEmpty) {
+          final values = snapshot.data?.places ?? const <VisitedPlace>[];
+          final pending =
+              snapshot.data?.pendingGroups ?? const <PendingVisitGroup>[];
+          if (values.isEmpty && pending.isEmpty) {
             return ListView(
               padding: const EdgeInsets.all(28),
               children: [
@@ -94,7 +108,7 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
           }
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-            itemCount: values.length + 2,
+            itemCount: values.length + pending.length + 2,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               if (index == 0) {
@@ -111,13 +125,25 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
                   ),
                 );
               }
-              final place = values[index - 2];
+              final contentIndex = index - 2;
+              if (contentIndex < pending.length) {
+                return _PendingVisitGroupTile(
+                  key: ValueKey('pending-visit-${pending[contentIndex].id}'),
+                  group: pending[contentIndex],
+                  onConfirm: (place) =>
+                      _confirmGroup(pending[contentIndex], place),
+                );
+              }
+              final place = values[contentIndex - pending.length];
               return ListTile(
+                key: ValueKey('visited-place-${place.poiId}'),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 8,
                   vertical: 8,
                 ),
-                leading: CircleAvatar(child: Text('$index')),
+                leading: CircleAvatar(
+                  child: Text('${contentIndex - pending.length + 1}'),
+                ),
                 title: Text(place.name),
                 subtitle: Text(
                   [
@@ -168,6 +194,18 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
     }
   }
 
+  Future<void> _confirmGroup(
+    PendingVisitGroup group,
+    PointOfInterest place,
+  ) async {
+    await widget.privateData.resolvePendingVisitGroup(group.id, place);
+    if (!mounted) return;
+    _refresh();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Visit saved at ${place.name}.')));
+  }
+
   Future<void> _showDiagnostics() async {
     final store = widget.privateData;
     if (store is! VisitDiagnosticStore) return;
@@ -188,6 +226,117 @@ class _MostVisitedScreenState extends State<MostVisitedScreen> {
     if (difference.inDays < 7) return '${difference.inDays}d ago';
     return '${value.month}/${value.day}/${value.year}';
   }
+}
+
+class _MostVisitedData {
+  const _MostVisitedData({required this.places, required this.pendingGroups});
+  final List<VisitedPlace> places;
+  final List<PendingVisitGroup> pendingGroups;
+}
+
+class _PendingVisitGroupTile extends StatefulWidget {
+  const _PendingVisitGroupTile({
+    super.key,
+    required this.group,
+    required this.onConfirm,
+  });
+  final PendingVisitGroup group;
+  final Future<void> Function(PointOfInterest place) onConfirm;
+
+  @override
+  State<_PendingVisitGroupTile> createState() => _PendingVisitGroupTileState();
+}
+
+class _PendingVisitGroupTileState extends State<_PendingVisitGroupTile> {
+  late bool expanded = widget.group.suggestedPlace == null;
+  bool saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final suggested = widget.group.suggestedPlace;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Which place were you at?',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${widget.group.candidates.length} nearby places detected • ${_date(widget.group.arrival)}',
+            ),
+            if (suggested != null && !expanded) ...[
+              const SizedBox(height: 14),
+              Text(
+                suggested.name,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              if (suggested.address.isNotEmpty) Text(suggested.address),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton(
+                    onPressed: saving ? null : () => _save(suggested),
+                    child: const Text('I was here'),
+                  ),
+                  OutlinedButton(
+                    onPressed: saving
+                        ? null
+                        : () => setState(() => expanded = true),
+                    child: const Text('Not here this time'),
+                  ),
+                ],
+              ),
+            ] else ...[
+              const SizedBox(height: 10),
+              for (final place in widget.group.candidates)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(place.name),
+                            Text(
+                              [
+                                place.category,
+                                if (place.address.isNotEmpty) place.address,
+                              ].join(' • '),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed: saving ? null : () => _save(place),
+                        child: const Text('I was here'),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save(PointOfInterest place) async {
+    setState(() => saving = true);
+    await widget.onConfirm(place);
+    if (mounted) setState(() => saving = false);
+  }
+
+  String _date(DateTime value) => '${value.month}/${value.day}/${value.year}';
 }
 
 class _TrackingDiagnosticsSheet extends StatefulWidget {

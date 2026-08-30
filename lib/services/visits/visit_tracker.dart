@@ -9,6 +9,8 @@ import '../location/location_service.dart';
 import '../storage/private_data_store.dart';
 
 class VisitTracker {
+  static const int maximumAmbiguousCandidates = 5;
+
   VisitTracker(
     this._locationService,
     this._poiRepository,
@@ -50,6 +52,7 @@ class VisitTracker {
   int _candidateObservations = 0;
   Coordinates? _unknownCenter;
   int? _activeSessionId;
+  int? _activePendingGroupId;
   String? _activePoiId;
   String? _departureCandidateId;
   DateTime? _departureCandidateSince;
@@ -207,11 +210,11 @@ class VisitTracker {
               '${nearby[1].name} ${_feet(nearby[1].distanceMeters!)}',
         );
       }
-      await _recordUnknownObservation(coordinates, at);
+      await _recordAmbiguousObservation(nearby, at);
       return;
     }
     final candidate = nearby.first;
-    if (_activeSessionId != null) {
+    if (_activeSessionId != null || _activePendingGroupId != null) {
       if (candidate.id == _activePoiId) {
         _clearPendingDeparture();
         _candidateId = candidate.id;
@@ -270,18 +273,31 @@ class VisitTracker {
     final nearby = custom.isNotEmpty
         ? custom
         : await _poiRepository.nearby(visit.coordinates, radiusMeters: 150);
-    if (nearby.isEmpty || _isAmbiguous(nearby)) {
+    if (nearby.isEmpty) {
       await _privateDataStore.recordUnknownStay(
         visit.coordinates,
         visit.departure,
       );
       await _diagnostic(
-        nearby.isEmpty ? 'native_visit_unknown' : 'native_visit_ambiguous',
-        nearby.isEmpty
-            ? 'No POI within ${_feet(150)}'
-            : '${nearby[0].name}; ${nearby[1].name}',
+        'native_visit_unknown',
+        'No POI within ${_feet(150)}',
         at: visit.departure,
       );
+      return;
+    }
+    if (_isAmbiguous(nearby)) {
+      final candidates = _ambiguousCandidates(nearby);
+      final groupId = await _privateDataStore.beginPendingVisitGroup(
+        candidates,
+        visit.arrival,
+      );
+      await _privateDataStore.endPendingVisitGroup(groupId, visit.departure);
+      await _diagnostic(
+        'native_visit_group_recorded',
+        candidates.map((place) => place.name).join('; '),
+        at: visit.departure,
+      );
+      await onObservation?.call(visit.departure);
       return;
     }
     final place = nearby.first;
@@ -303,7 +319,8 @@ class VisitTracker {
     Coordinates coordinates,
     DateTime at,
   ) async {
-    if (_activeSessionId != null && !await _confirmDeparture('unknown', at)) {
+    if ((_activeSessionId != null || _activePendingGroupId != null) &&
+        !await _confirmDeparture('unknown', at)) {
       return;
     }
     final sameCluster =
@@ -334,12 +351,58 @@ class VisitTracker {
     _recordedCandidate = true;
   }
 
+  Future<void> _recordAmbiguousObservation(
+    List<PointOfInterest> nearby,
+    DateTime at,
+  ) async {
+    final candidates = _ambiguousCandidates(nearby);
+    final candidateKey =
+        'group:${candidates.map((place) => place.id).join('|')}';
+    if (_activeSessionId != null || _activePendingGroupId != null) {
+      if (candidateKey == _activePoiId) {
+        _clearPendingDeparture();
+        _candidateId = candidateKey;
+        return;
+      }
+      if (!await _confirmDeparture(candidateKey, at)) return;
+    }
+    if (_candidateId != candidateKey) {
+      _candidateId = candidateKey;
+      _unknownCenter = null;
+      _candidateSince = at;
+      _candidateObservations = 1;
+      _recordedCandidate = false;
+      return;
+    }
+    _candidateObservations++;
+    if (_recordedCandidate ||
+        _candidateObservations < minimumObservations ||
+        at.difference(_candidateSince!) < minimumDwell) {
+      return;
+    }
+    _activePendingGroupId = await _privateDataStore.beginPendingVisitGroup(
+      candidates,
+      _candidateSince!,
+    );
+    _activePoiId = candidateKey;
+    _recordedCandidate = true;
+    await _diagnostic(
+      'visit_group_recorded',
+      candidates.map((place) => place.name).join('; '),
+    );
+  }
+
   Future<void> _endActiveVisit(DateTime departure) async {
     final id = _activeSessionId;
-    if (id == null) return;
+    final groupId = _activePendingGroupId;
+    if (id == null && groupId == null) return;
     _activeSessionId = null;
+    _activePendingGroupId = null;
     _activePoiId = null;
-    await _privateDataStore.endVisitSession(id, departure);
+    if (id != null) await _privateDataStore.endVisitSession(id, departure);
+    if (groupId != null) {
+      await _privateDataStore.endPendingVisitGroup(groupId, departure);
+    }
   }
 
   Future<bool> _confirmDeparture(String newLocationId, DateTime at) async {
@@ -424,5 +487,11 @@ class VisitTracker {
         firstAddress == second.address.trim().toLowerCase() &&
         first.category == second.category;
     return !duplicateAtSameAddress;
+  }
+
+  List<PointOfInterest> _ambiguousCandidates(List<PointOfInterest> nearby) {
+    return nearby
+        .take(maximumAmbiguousCandidates)
+        .toList(growable: false);
   }
 }
