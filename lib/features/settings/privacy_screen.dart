@@ -1,15 +1,56 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../services/storage/private_data_store.dart';
+import '../../services/profile/user_profile_service.dart';
+import '../../services/voice/speech_voice_service.dart';
+import '../onboarding/profile_onboarding_screen.dart';
+import '../../services/local_ai/development_local_ai_service.dart';
+import 'local_ai_settings.dart';
 
 class PrivacyScreen extends StatelessWidget {
-  const PrivacyScreen({super.key, required this.privateData});
+  const PrivacyScreen({
+    super.key,
+    required this.privateData,
+    required this.profileService,
+    required this.speechVoices,
+    required this.localAi,
+    required this.prayerStore,
+  });
   final PrivateDataStore privateData;
+  final UserProfileService profileService;
+  final SpeechVoiceService speechVoices;
+  final DevelopmentLocalAiService localAi;
+  final PrayerStore prayerStore;
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Privacy')),
+    appBar: AppBar(title: const Text('Settings')),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        LocalAiSettingsSection(service: localAi),
+        const SizedBox(height: 12),
+        ListTile(
+          leading: const Icon(Icons.record_voice_over_outlined),
+          title: const Text('Assistant profile and voice'),
+          subtitle: const Text('Address, personality, and spoken voice'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => ProfileOnboardingScreen(
+                initialProfile: profileService.load(),
+                editing: true,
+                speechVoices: speechVoices,
+                prayerStore: prayerStore,
+                onComplete: (profile) async {
+                  await profileService.save(profile);
+                  if (context.mounted) Navigator.pop(context);
+                },
+              ),
+            ),
+          ),
+        ),
+        const Divider(),
         const ListTile(
           leading: Icon(Icons.location_on_outlined),
           title: Text('Location processing'),
@@ -35,20 +76,61 @@ class PrivacyScreen extends StatelessWidget {
           title: Text('Location uploaded to our servers'),
           subtitle: Text('Never'),
         ),
-        const ListTile(
-          leading: Icon(Icons.public_outlined),
-          title: Text('OpenStreetMap downloads'),
-          subtitle: Text(
-            'A rounded approximate area is shared only when downloading or refreshing public POIs. Precise GPS and history stay local.',
+        ListTile(
+          leading: const Icon(Icons.privacy_tip_outlined),
+          title: const Text('Privacy policy'),
+          subtitle: const Text('How on-device data and downloads are handled'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => const _PrivacyPolicyScreen(),
+            ),
           ),
         ),
-        const Divider(),
         const ListTile(
-          enabled: false,
-          title: Text('Delete location history'),
-          subtitle: Text('Available when history is added'),
+          leading: Icon(Icons.public_outlined),
+          title: Text('Offline places data'),
+          subtitle: Text(
+            'Static Overture Maps region packages are downloaded without sending your coordinates.',
+          ),
         ),
-        const ListTile(enabled: false, title: Text('Delete learned places')),
+        ListTile(
+          leading: const Icon(Icons.info_outline),
+          title: const Text('Public data attribution'),
+          subtitle: const Text(
+            'Overture Maps Foundation • includes Apache-2.0 Foursquare places',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _showAttribution(context),
+        ),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.history_outlined),
+          title: const Text('Delete location history'),
+          subtitle: const Text('Removes locally recorded visited places'),
+          onTap: () async {
+            await privateData.deleteVisitHistory();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Visit history deleted.')),
+              );
+            }
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.home_work_outlined),
+          title: const Text('Delete custom places'),
+          subtitle: const Text('Removes Home, Work, and other private POIs'),
+          onTap: () async {
+            await privateData.deleteCustomPlaces();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Custom places deleted.')),
+              );
+            }
+          },
+        ),
         const ListTile(enabled: false, title: Text('Delete reminders')),
         FilledButton.tonalIcon(
           icon: const Icon(Icons.delete_outline),
@@ -68,5 +150,119 @@ class PrivacyScreen extends StatelessWidget {
         ),
       ],
     ),
+  );
+
+  Future<void> _showAttribution(BuildContext context) async {
+    final notice = await rootBundle.loadString(
+      'assets/licenses/Foursquare-NOTICE.txt',
+    );
+    final license = await rootBundle.loadString(
+      'assets/licenses/APACHE-2.0.txt',
+    );
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Offline places attribution'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Text(
+              'Overture Maps Foundation\nhttps://overturemaps.org\n\n$notice\n\n$license',
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrivacyPolicyScreen extends StatelessWidget {
+  const _PrivacyPolicyScreen();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Privacy policy')),
+    body: ListView(
+      padding: const EdgeInsets.all(20),
+      children: const [
+        Text(
+          'Private Concierge Privacy Policy',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 4),
+        Text('Effective August 18, 2026'),
+        SizedBox(height: 20),
+        Text(
+          'Private Concierge is designed to process personal information on '
+          'your device. It has no user account, advertising SDK, analytics '
+          'SDK, or Private Concierge personal-data server.',
+        ),
+        SizedBox(height: 16),
+        Text('Information kept on your device', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Your assistant profile, preferences, saved places, visit history, '
+          'prayers, prayer routines, saved prayer transcripts, downloaded map data, '
+          'downloaded AI models, and generated prayer audio are stored in the '
+          "app's private storage. Microphone recordings are not retained after "
+          'speech recognition finishes.',
+        ),
+        SizedBox(height: 16),
+        Text('Network connections', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'The app connects to public hosts only to discover and download '
+          'Overture Maps coverage and optional AI or speech models. Those '
+          'hosts receive ordinary network information such as your IP address '
+          'and the requested files or byte ranges. Map download requests can '
+          'indicate the general coverage area selected for offline use, but '
+          'the app does not send your visit history, saved prayers, profile, '
+          'or raw travel history to them. Apple system services may process '
+          'requests such as reverse geocoding under Apple’s own privacy terms.',
+        ),
+        SizedBox(height: 16),
+        Text('Permissions', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Location permission enables nearby-place lookup and private visit '
+          'recognition, including in the background when you grant Always '
+          'access. Microphone and speech-recognition permissions enable spoken '
+          'assistant requests and prayer dictation. You can revoke these '
+          'permissions at any time in iOS Settings.',
+        ),
+        SizedBox(height: 16),
+        Text('Retention and deletion', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Personal information remains on your device until you delete it. '
+          'The Settings screen lets you delete visit history, custom places, '
+          'or the private database containing visits and prayers. Your profile '
+          'and voice preferences can be changed in Settings. Optional '
+          'downloaded models can be removed from their settings. Deleting the '
+          'app removes its remaining private app storage.',
+        ),
+        SizedBox(height: 16),
+        Text('Sharing and tracking', style: _policyHeading),
+        SizedBox(height: 6),
+        Text(
+          'Private Concierge does not sell personal information, share it with '
+          'advertisers or data brokers, or track you across other companies’ '
+          'apps and websites.',
+        ),
+        SizedBox(height: 24),
+      ],
+    ),
+  );
+
+  static const _policyHeading = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w600,
   );
 }

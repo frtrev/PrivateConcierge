@@ -1,14 +1,13 @@
 import 'dart:convert';
 
-import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/models/geo.dart';
 import '../../core/models/region.dart';
 import '../../repositories/poi_repository.dart';
 import '../geography/region_resolver.dart';
-import '../network/download_client.dart';
-import 'open_street_map_package.dart';
+import 'overture_package_source.dart';
 
 class PackageProgress {
   const PackageProgress(this.fraction, this.message);
@@ -20,22 +19,21 @@ abstract interface class RegionPackageManager {
   Future<bool> isCurrent(Region region);
   Stream<PackageProgress> install(Region region);
   Future<List<Region>> installedRegions();
-  Future<int?> installedPoiCount(Region region);
   Future<void> delete(Region region);
+  Future<void> removeLegacyRegions();
 }
 
-class OpenStreetMapRegionPackageManager implements RegionPackageManager {
-  OpenStreetMapRegionPackageManager(
+class OvertureRegionPackageManager implements RegionPackageManager {
+  OvertureRegionPackageManager(
     this._preferences,
     this._repository,
-    this._source, {
-    this.retryDelays = const [Duration(seconds: 2), Duration(seconds: 5)],
-  });
+    this._source,
+  );
   final SharedPreferences _preferences;
   final PoiRepository _repository;
-  final OpenStreetMapPackageSource _source;
-  final List<Duration> retryDelays;
+  final OverturePackageSource _source;
   static const _prefix = 'public_region_version_';
+  static const _catalogKey = 'installed_overture_regions_v2';
 
   @override
   Future<bool> isCurrent(Region region) async =>
@@ -43,119 +41,82 @@ class OpenStreetMapRegionPackageManager implements RegionPackageManager {
 
   @override
   Stream<PackageProgress> install(Region region) async* {
-    OpenStreetMapDownload? completed;
-    final maxAttempts = retryDelays.length + 1;
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      final attemptBase = (attempt - 1) * .62 / maxAttempts;
-      final attemptSpan = .62 / maxAttempts;
-      yield PackageProgress(
-        attemptBase + .01,
-        'Connecting to OpenStreetMap • attempt $attempt of $maxAttempts',
-      );
+    OverturePackageDownload? completed;
+    for (var attempt = 1; attempt <= 3; attempt++) {
       try {
+        yield PackageProgress(
+          .02,
+          'Connecting to Overture • attempt $attempt of 3',
+        );
         await for (final update in _source.download(region)) {
-          final network = update.networkFraction;
-          final withinAttempt = network == null ? .12 : network.clamp(0, 1);
+          final fraction = update.fraction ?? 0;
           yield PackageProgress(
-            attemptBase + withinAttempt * attemptSpan,
-            'Downloading POIs • attempt $attempt of $maxAttempts • ${_formatBytes(update.bytes)}',
+            .04 + fraction * .74,
+            'Downloading ${region.coverageMiles}-mile area • ${_formatBytes(update.bytes)}',
           );
           if (update.points != null) completed = update;
         }
         break;
-      } on PublicDownloadException catch (error) {
-        if (!error.retryable || attempt == maxAttempts) {
-          throw RegionDownloadException(_friendlyFailure(error));
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('Overture area attempt $attempt failed: $error');
+          debugPrintStack(stackTrace: stackTrace);
         }
-        final delay = retryDelays[attempt - 1];
-        final seconds = delay.inSeconds;
-        if (seconds == 0) {
-          yield PackageProgress(
-            attemptBase + attemptSpan,
-            'OpenStreetMap is temporarily busy • retrying now',
+        if (attempt == 3) {
+          throw const OverturePackageException(
+            'The offline area could not be completed after three attempts. Your existing private data was not changed. Check your connection and try again.',
           );
-        } else {
-          for (var remaining = seconds; remaining > 0; remaining--) {
-            yield PackageProgress(
-              attemptBase + attemptSpan,
-              'OpenStreetMap is temporarily busy • retrying in $remaining seconds',
-            );
-            await Future<void>.delayed(const Duration(seconds: 1));
-          }
         }
+        yield PackageProgress(.08, 'Connection interrupted • retrying safely');
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
       }
     }
-    if (completed?.points == null ||
-        completed!.points!.isEmpty ||
-        completed.rawBytes == null) {
-      throw const FormatException(
-        'The downloaded region package was incomplete.',
+    final points = completed?.points;
+    if (points == null || points.isEmpty) {
+      throw const OverturePackageException(
+        'The downloaded area contained no usable places.',
       );
     }
-    yield const PackageProgress(.70, 'Verifying downloaded package integrity');
-    final digest = sha256.convert(completed.rawBytes!).toString();
-    final points = completed.points!;
-    yield PackageProgress(.78, 'Installing ${points.length} real POIs locally');
-    // replaceRegion is transactional: the prior installed package survives a failed replacement.
+    yield PackageProgress(
+      .82,
+      'Installing ${points.length} places on this device',
+    );
     await _repository.replaceRegion(region.id, points);
+    final siblings = (await installedRegions()).where(
+      (candidate) =>
+          candidate.id != region.id &&
+          distanceMeters(candidate.center, region.center) < 1000,
+    );
+    for (final sibling in siblings) {
+      await delete(sibling);
+    }
     final now = DateTime.now();
     await _preferences.setInt('$_prefix${region.id}', region.version);
     await _preferences.setString(
       'public_region_updated_${region.id}',
       now.toIso8601String(),
     );
-    await _preferences.setString('public_region_sha256_${region.id}', digest);
     await _preferences.setInt(
       'public_region_poi_count_${region.id}',
       points.length,
     );
-    await _preferences.setString(
-      'public_region_source_${region.id}',
-      'OpenStreetMap',
-    );
-    await _preferences.setString(
-      'public_region_metadata_${region.id}',
-      jsonEncode({
-        'id': region.id,
-        'name': region.name,
-        'administrativeArea': region.administrativeArea,
-        'country': region.country,
-        'south': region.bounds.south,
-        'west': region.bounds.west,
-        'north': region.bounds.north,
-        'east': region.bounds.east,
-        'version': region.version,
-        'downloadUrl': region.downloadUrl.toString(),
-        'approximateBytes': region.approximateBytes,
-      }),
-    );
-    yield PackageProgress(1, '${points.length} OpenStreetMap POIs ready');
+    await _saveCatalogRegion(region, now);
+    yield PackageProgress(1, '${points.length} Overture places ready offline');
   }
 
   @override
   Future<List<Region>> installedRegions() async {
-    final installed = <Region>[];
-    for (final key in _preferences.getKeys().where(
-      (key) => key.startsWith(_prefix),
-    )) {
-      final id = key.substring(_prefix.length);
-      Region? region;
-      for (final candidate in bundledRegions) {
-        if (candidate.id == id) region = candidate;
-      }
-      region ??= _readRegion(id);
-      final updated = _preferences.getString('public_region_updated_$id');
-      final version = _preferences.getInt('$_prefix$id');
-      if (region != null && updated != null && version != null) {
-        installed.add(region.installed(version, DateTime.parse(updated)));
-      }
+    final raw = _preferences.getString(_catalogKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>)
+          .map((value) => _fromJson(value as Map<String, dynamic>))
+          .where((region) => _preferences.containsKey('$_prefix${region.id}'))
+          .toList();
+    } catch (_) {
+      return [];
     }
-    return installed;
   }
-
-  @override
-  Future<int?> installedPoiCount(Region region) async =>
-      _preferences.getInt('public_region_poi_count_${region.id}');
 
   @override
   Future<void> delete(Region region) async {
@@ -163,54 +124,91 @@ class OpenStreetMapRegionPackageManager implements RegionPackageManager {
     for (final key in [
       '$_prefix${region.id}',
       'public_region_updated_${region.id}',
-      'public_region_sha256_${region.id}',
       'public_region_poi_count_${region.id}',
-      'public_region_source_${region.id}',
-      'public_region_metadata_${region.id}',
     ]) {
       await _preferences.remove(key);
     }
-  }
-
-  Region? _readRegion(String id) {
-    final raw = _preferences.getString('public_region_metadata_$id');
-    if (raw == null) return null;
-    final value = jsonDecode(raw);
-    if (value is! Map<String, dynamic>) return null;
-    return Region(
-      id: value['id'] as String,
-      name: value['name'] as String,
-      administrativeArea: value['administrativeArea'] as String,
-      country: value['country'] as String,
-      bounds: GeoBounds(
-        south: (value['south'] as num).toDouble(),
-        west: (value['west'] as num).toDouble(),
-        north: (value['north'] as num).toDouble(),
-        east: (value['east'] as num).toDouble(),
-      ),
-      version: value['version'] as int,
-      downloadUrl: Uri.parse(value['downloadUrl'] as String),
-      approximateBytes: value['approximateBytes'] as int,
+    final remaining = (await installedRegions()).where(
+      (value) => value.id != region.id,
+    );
+    await _preferences.setString(
+      _catalogKey,
+      jsonEncode(remaining.map(_toJson).toList()),
     );
   }
 
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  @override
+  Future<void> removeLegacyRegions() async {
+    for (final id in legacyRegionIds) {
+      await _repository.deleteRegion(id);
+      await _preferences.remove('$_prefix$id');
+    }
   }
 
-  String _friendlyFailure(PublicDownloadException error) {
-    if (error.kind == PublicDownloadFailure.connection) {
-      return 'We could not connect to the geographic data service. Check your internet connection and try again.';
-    }
-    return 'The geographic data service is taking longer than usual. Your existing downloaded places are safe. Please try again in a few minutes.';
+  Future<void> _saveCatalogRegion(Region region, DateTime installedAt) async {
+    final values = (await installedRegions())
+        .where((value) => value.id != region.id)
+        .toList();
+    values.add(region.installed(region.version, installedAt));
+    await _preferences.setString(
+      _catalogKey,
+      jsonEncode(values.map(_toJson).toList()),
+    );
   }
+
+  Map<String, dynamic> _toJson(Region value) => {
+    'id': value.id,
+    'name': value.name,
+    'area': value.administrativeArea,
+    'country': value.country,
+    'lat': value.center.latitude,
+    'lon': value.center.longitude,
+    'south': value.bounds.south,
+    'west': value.bounds.west,
+    'north': value.bounds.north,
+    'east': value.bounds.east,
+    'version': value.version,
+    'release': value.release,
+    'url': value.downloadUrl.toString(),
+    'bytes': value.approximateBytes,
+    'miles': value.coverageMiles,
+    'installed': value.lastUpdated?.toIso8601String(),
+  };
+
+  Region _fromJson(Map<String, dynamic> value) => Region(
+    id: value['id'] as String,
+    name: value['name'] as String,
+    administrativeArea: value['area'] as String? ?? '',
+    country: value['country'] as String? ?? '',
+    center: Coordinates(
+      (value['lat'] as num).toDouble(),
+      (value['lon'] as num).toDouble(),
+    ),
+    bounds: GeoBounds(
+      south: (value['south'] as num).toDouble(),
+      west: (value['west'] as num).toDouble(),
+      north: (value['north'] as num).toDouble(),
+      east: (value['east'] as num).toDouble(),
+    ),
+    version: value['version'] as int,
+    release: value['release'] as String? ?? '',
+    downloadUrl: Uri.parse(value['url'] as String),
+    approximateBytes: value['bytes'] as int,
+    coverageMiles: value['miles'] as int,
+    installedVersion: value['version'] as int,
+    lastUpdated: value['installed'] == null
+        ? null
+        : DateTime.parse(value['installed'] as String),
+  );
+
+  String _formatBytes(int bytes) => bytes < 1024 * 1024
+      ? '${(bytes / 1024).toStringAsFixed(0)} KB'
+      : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
-class RegionDownloadException implements Exception {
-  const RegionDownloadException(this.userMessage);
-  final String userMessage;
+class OverturePackageException implements Exception {
+  const OverturePackageException(this.message);
+  final String message;
   @override
-  String toString() => userMessage;
+  String toString() => message;
 }

@@ -1,4 +1,4 @@
-package com.privateconcierge.private_concierge.car
+package com.neotheone.privateconcierge.car
 
 import androidx.car.app.CarContext
 import androidx.car.app.Screen

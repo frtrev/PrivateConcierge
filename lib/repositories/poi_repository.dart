@@ -8,6 +8,7 @@ abstract interface class PoiRepository {
   Future<List<PointOfInterest>> nearby(
     Coordinates origin, {
     String? category,
-    double radiusMeters = 50 * metersPerMile,
+    String? query,
+    double radiusMeters = 15000,
   });
 }

@@ -24,10 +24,17 @@ class MemoryPoiRepository implements PoiRepository {
   Future<List<PointOfInterest>> nearby(
     Coordinates origin, {
     String? category,
+    String? query,
     double radiusMeters = 15000,
   }) async =>
       points
           .where((p) => category == null || p.category == category)
+          .where(
+            (p) =>
+                query == null ||
+                query.isEmpty ||
+                p.name.toLowerCase().contains(query.toLowerCase()),
+          )
           .map((p) => p.withDistance(distanceMeters(origin, p.coordinates)))
           .where((p) => p.distanceMeters! <= radiusMeters)
           .toList()

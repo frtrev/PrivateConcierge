@@ -14,14 +14,14 @@ class BootstrapUpdate {
     required this.progress,
     required this.status,
     this.requiresLocationExplanation = false,
-    this.requiresAreaDownloadConsent = false,
+    this.downloadOptions = const [],
     this.error,
     this.ready = false,
   });
   final double progress;
   final String status;
   final bool requiresLocationExplanation;
-  final bool requiresAreaDownloadConsent;
+  final List<Region> downloadOptions;
   final Object? error;
   final bool ready;
 }
@@ -46,24 +46,32 @@ class BootstrapService {
   Coordinates? coordinates;
   Region? region;
 
-  Future<void> selectDevelopmentRegion(Region selected) async {
-    await activateDevelopmentRegion(selected);
-    if (!await packageManager.isCurrent(selected)) {
+  Future<Coordinates> refreshCurrentLocation() async {
+    coordinates = await locationService.currentLocation();
+    return coordinates!;
+  }
+
+  Stream<Coordinates> foregroundLocationUpdates() =>
+      locationService.locationUpdates(background: false).map((value) {
+        coordinates = value;
+        return value;
+      });
+
+  Future<void> installHomeRegion(
+    Region selected, {
+    bool forceUpdate = false,
+  }) async {
+    region = selected;
+    if (forceUpdate || !await packageManager.isCurrent(selected)) {
       await packageManager.install(selected).drain<void>();
     }
   }
 
-  Future<void> activateDevelopmentRegion(Region selected) async {
-    region = selected;
-    coordinates = Coordinates(
-      (selected.bounds.south + selected.bounds.north) / 2,
-      (selected.bounds.west + selected.bounds.east) / 2,
-    );
-  }
+  void selectInstalledRegion(Region selected) => region = selected;
 
   Stream<BootstrapUpdate> run({
     bool requestLocation = false,
-    bool allowAreaDownload = false,
+    Region? confirmedRegion,
   }) async* {
     try {
       yield const BootstrapUpdate(
@@ -75,6 +83,7 @@ class BootstrapService {
         status: 'Opening public geographic database',
       );
       await poiRepository.open();
+      await packageManager.removeLegacyRegions();
       yield const BootstrapUpdate(
         progress: .20,
         status: 'Opening private on-device storage',
@@ -89,7 +98,7 @@ class BootstrapService {
         yield const BootstrapUpdate(
           progress: .28,
           status:
-              'Location helps select your offline city data. Your coordinates stay on this device.',
+              'Location is used once to identify and download your offline area. Your travel history stays on this device.',
           requiresLocationExplanation: true,
         );
         return;
@@ -107,27 +116,45 @@ class BootstrapService {
           progress: .52,
           status: 'Determining current region',
         );
-        region = await regionResolver.resolve(coordinates!);
-        region ??= const CurrentAreaRegionFactory().create(coordinates!);
-        yield BootstrapUpdate(
-          progress: .60,
-          status: 'Checking ${region!.displayName} geographic data',
-        );
-        if (!await packageManager.isCurrent(region!)) {
-          if (!allowAreaDownload) {
-            yield const BootstrapUpdate(
-              progress: .60,
-              status:
-                  'To build your offline baseline, the app will send a rounded approximate area—not your precise GPS point—to OpenStreetMap. No account, history, or device identifier is included.',
-              requiresAreaDownloadConsent: true,
-            );
-            return;
+        final options = await regionResolver.options(coordinates!);
+        region = confirmedRegion;
+        if (region == null) {
+          final installed = await packageManager.installedRegions();
+          for (final candidate in installed) {
+            if (distanceMeters(candidate.center, coordinates!) <=
+                candidate.coverageMiles * 1609.344) {
+              region = candidate;
+              break;
+            }
           }
-          await for (final progress in packageManager.install(region!)) {
-            yield BootstrapUpdate(
-              progress: .60 + progress.fraction * .22,
-              status: progress.message,
-            );
+        }
+        region ??= await regionResolver.resolve(coordinates!);
+        if (region == null) {
+          yield const BootstrapUpdate(
+            progress: .60,
+            status:
+                'No offline package covers this location yet. Continuing with manual region selection.',
+          );
+        } else {
+          yield BootstrapUpdate(
+            progress: .60,
+            status: 'Checking ${region!.displayName} geographic data',
+          );
+          if (!await packageManager.isCurrent(region!)) {
+            if (confirmedRegion == null) {
+              yield BootstrapUpdate(
+                progress: .60,
+                status: 'Choose your offline coverage',
+                downloadOptions: options,
+              );
+              return;
+            }
+            await for (final progress in packageManager.install(region!)) {
+              yield BootstrapUpdate(
+                progress: .60 + progress.fraction * .22,
+                status: progress.message,
+              );
+            }
           }
         }
       } else {

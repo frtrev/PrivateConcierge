@@ -1,4 +1,4 @@
-package com.privateconcierge.private_concierge.car
+package com.neotheone.privateconcierge.car
 
 import android.content.Intent
 import android.net.Uri

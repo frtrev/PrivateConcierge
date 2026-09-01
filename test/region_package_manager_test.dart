@@ -1,202 +1,79 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:private_concierge/core/models/geo.dart';
-import 'package:private_concierge/services/downloads/open_street_map_package.dart';
+import 'package:private_concierge/core/models/poi.dart';
+import 'package:private_concierge/core/models/region.dart';
+import 'package:private_concierge/services/downloads/overture_package_source.dart';
 import 'package:private_concierge/services/downloads/region_package_manager.dart';
-import 'package:private_concierge/services/geography/region_resolver.dart';
-import 'package:private_concierge/services/network/download_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'nearby_service_test.dart';
 
-class _DownloadClient implements DownloadClient {
+class FakePackageSource extends OverturePackageSource {
+  const FakePackageSource();
   @override
-  Stream<DownloadChunk> downloadPublicResource(
-    PublicDownloadRequest request,
-  ) async* {
-    expect(request.formFields['data'], contains('out center tags'));
-    final bytes = utf8.encode(
-      jsonEncode({
-        'elements': [
-          {
-            'type': 'node',
-            'id': 42,
-            'lat': 35.1,
-            'lon': -90.0,
-            'tags': {
-              'name': 'Real Cafe',
-              'amenity': 'cafe',
-              'addr:housenumber': '12',
-              'addr:street': 'Beale St',
-            },
-          },
-          {
-            'type': 'way',
-            'id': 84,
-            'center': {'lat': 35.2, 'lon': -90.1},
-            'tags': {'name': 'Real Museum', 'tourism': 'museum'},
-          },
-        ],
-      }),
+  Stream<OverturePackageDownload> download(Region region) async* {
+    yield const OverturePackageDownload(bytes: 100, fraction: .5);
+    yield OverturePackageDownload(
+      bytes: 200,
+      fraction: 1,
+      points: [
+        PointOfInterest(
+          id: 'real',
+          regionId: region.id,
+          name: 'Test Place',
+          coordinates: region.center,
+          category: 'other',
+          subcategory: 'place',
+          address: '',
+        ),
+      ],
     );
-    yield DownloadChunk(
-      bytes: bytes,
-      receivedBytes: bytes.length,
-      totalBytes: bytes.length,
-    );
-  }
-}
-
-class _FlakyDownloadClient implements DownloadClient {
-  _FlakyDownloadClient(this.failuresBeforeSuccess);
-  final int failuresBeforeSuccess;
-  int attempts = 0;
-
-  @override
-  Stream<DownloadChunk> downloadPublicResource(
-    PublicDownloadRequest request,
-  ) async* {
-    attempts++;
-    if (attempts <= failuresBeforeSuccess) {
-      throw const PublicDownloadException(
-        kind: PublicDownloadFailure.server,
-        retryable: true,
-        statusCode: 504,
-      );
-    }
-    yield* _DownloadClient().downloadPublicResource(request);
-  }
-}
-
-class _CountingDownloadClient implements DownloadClient {
-  int requests = 0;
-  @override
-  Stream<DownloadChunk> downloadPublicResource(
-    PublicDownloadRequest request,
-  ) async* {
-    requests++;
-    yield* _DownloadClient().downloadPublicResource(request);
   }
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  test(
-    'downloads, parses, fingerprints, and records a real OSM package',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final repository = MemoryPoiRepository();
-      final preferences = await SharedPreferences.getInstance();
-      final manager = OpenStreetMapRegionPackageManager(
-        preferences,
-        repository,
-        OpenStreetMapPackageSource(_DownloadClient()),
-      );
-      final updates = await manager.install(bundledRegions.first).toList();
-      expect(updates.last.fraction, 1);
-      expect(updates.last.message, contains('2 OpenStreetMap POIs'));
-      expect(await manager.isCurrent(bundledRegions.first), isTrue);
-      expect(
-        repository.points.map((point) => point.name),
-        containsAll(['Real Cafe', 'Real Museum']),
-      );
-      expect(repository.points.first.category, 'restaurant');
-      expect(
-        preferences.getString('public_region_sha256_us-tn-memphis'),
-        hasLength(64),
-      );
-      expect(
-        (await manager.installedRegions()).single.id,
-        bundledRegions.first.id,
-      );
-    },
-  );
-
-  test('parser uses centers for OSM ways and normalizes categories', () async {
-    final updates = await OpenStreetMapPackageSource(
-      _DownloadClient(),
-    ).download(bundledRegions.first).toList();
-    final points = updates.last.points!;
-    expect(points.last.id, '${bundledRegions.first.id}-osm-way-84');
-    expect(points.last.category, 'museum');
-    expect(points.last.address, bundledRegions.first.displayName);
-  });
-
-  test('same OSM feature is namespaced across overlapping regions', () {
-    final source = OpenStreetMapPackageSource(_DownloadClient());
-    final element = [
-      {
-        'type': 'node',
-        'id': 42,
-        'lat': 35.1,
-        'lon': -90.0,
-        'tags': {'name': 'Shared Cafe', 'amenity': 'cafe'},
-      },
-    ];
-    final first = source.parseElements(bundledRegions[0], element).single;
-    final second = source.parseElements(bundledRegions[1], element).single;
-    expect(first.id, isNot(second.id));
-    expect(first.id, startsWith('${bundledRegions[0].id}-'));
-    expect(second.id, startsWith('${bundledRegions[1].id}-'));
-  });
-
-  test('large current area uses four tiles and deduplicates POIs', () async {
-    final client = _CountingDownloadClient();
-    final region = const CurrentAreaRegionFactory().create(
-      const Coordinates(41.8781, -87.6298),
-    );
-    final updates = await OpenStreetMapPackageSource(
-      client,
-    ).download(region).toList();
-    expect(client.requests, 4);
-    expect(updates.last.points, hasLength(2));
-    expect(updates.last.networkFraction, 1);
-  });
-
-  test('retries transient timeouts and reports each attempt', () async {
+  test('installs and restores a dynamic area catalog', () async {
     SharedPreferences.setMockInitialValues({});
-    final client = _FlakyDownloadClient(2);
-    final manager = OpenStreetMapRegionPackageManager(
+    final repository = MemoryPoiRepository();
+    final manager = OvertureRegionPackageManager(
       await SharedPreferences.getInstance(),
-      MemoryPoiRepository(),
-      OpenStreetMapPackageSource(client),
-      retryDelays: const [Duration.zero, Duration.zero],
+      repository,
+      const FakePackageSource(),
     );
-    final updates = await manager.install(bundledRegions.first).toList();
-    expect(client.attempts, 3);
-    expect(
-      updates.any((update) => update.message.contains('attempt 2 of 3')),
-      isTrue,
+    final region = Region(
+      id: 'okc',
+      name: 'Oklahoma City',
+      administrativeArea: 'Oklahoma',
+      country: 'US',
+      center: const Coordinates(35.4676, -97.5164),
+      bounds: const GeoBounds(south: 34, west: -99, north: 37, east: -96),
+      version: 202607220,
+      release: '2026-07-22.0',
+      downloadUrl: Uri.parse('https://example.test/places.pmtiles'),
+      approximateBytes: 1000,
+      coverageMiles: 50,
     );
+    final updates = await manager.install(region).toList();
     expect(updates.last.fraction, 1);
+    expect(await manager.isCurrent(region), isTrue);
+    expect(repository.points.single.name, 'Test Place');
+    expect(
+      (await manager.installedRegions()).single.displayName,
+      'Oklahoma City, Oklahoma',
+    );
   });
 
-  test('exhausted retries return only a user-facing failure', () async {
-    SharedPreferences.setMockInitialValues({});
-    final client = _FlakyDownloadClient(99);
-    final manager = OpenStreetMapRegionPackageManager(
-      await SharedPreferences.getInstance(),
-      MemoryPoiRepository(),
-      OpenStreetMapPackageSource(client),
-      retryDelays: const [Duration.zero, Duration.zero],
+  test('tile selection changes with the requested bounds', () {
+    const memphis = GeoBounds(
+      south: 35.0,
+      west: -90.2,
+      north: 35.2,
+      east: -89.9,
     );
-    await expectLater(
-      manager.install(bundledRegions.first).drain<void>(),
-      throwsA(
-        isA<RegionDownloadException>()
-            .having(
-              (error) => error.userMessage,
-              'message',
-              contains('try again'),
-            )
-            .having(
-              (error) => error.userMessage,
-              'raw response',
-              isNot(contains('504')),
-            ),
-      ),
-    );
-    expect(client.attempts, 3);
+    const okc = GeoBounds(south: 35.3, west: -97.7, north: 35.6, east: -97.3);
+    final a = OverturePackageSource.tileCoordinatesFor(memphis, 14);
+    final b = OverturePackageSource.tileCoordinatesFor(okc, 14);
+    expect(a, isNotEmpty);
+    expect(b, isNotEmpty);
+    expect(a.toSet().intersection(b.toSet()), isEmpty);
   });
 }

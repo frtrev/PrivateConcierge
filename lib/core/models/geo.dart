@@ -1,11 +1,16 @@
 import 'dart:math' as math;
 
-const metersPerMile = 1609.344;
-
 class Coordinates {
-  const Coordinates(this.latitude, this.longitude);
+  const Coordinates(
+    this.latitude,
+    this.longitude, {
+    this.horizontalAccuracyMeters,
+    this.reportedSpeedMetersPerSecond,
+  });
   final double latitude;
   final double longitude;
+  final double? horizontalAccuracyMeters;
+  final double? reportedSpeedMetersPerSecond;
 }
 
 class GeoBounds {

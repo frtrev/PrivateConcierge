@@ -1,104 +1,163 @@
+import 'dart:convert';
 import 'dart:math' as math;
+
+import 'package:geocoding/geocoding.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/models/geo.dart';
 import '../../core/models/region.dart';
 
 abstract interface class RegionResolver {
   Future<Region?> resolve(Coordinates coordinates);
+  Future<List<Region>> options(Coordinates coordinates);
 }
 
-class CurrentAreaRegionFactory {
-  const CurrentAreaRegionFactory();
+abstract interface class AreaLabelResolver {
+  Future<AreaLabel> label(Coordinates coordinates);
+}
 
-  Region create(Coordinates location, {double searchRadiusMiles = 50}) {
-    final roundedLat = (location.latitude * 10).round() / 10;
-    final roundedLon = (location.longitude * 10).round() / 10;
-    // The margin covers the maximum displacement introduced by rounding.
-    final coverageMiles = searchRadiusMiles + 8;
-    final latDelta = coverageMiles / 69.0;
-    final longitudeMilesPerDegree =
-        69.172 * math.cos(roundedLat * math.pi / 180).abs().clamp(.2, 1);
-    final lonDelta = coverageMiles / longitudeMilesPerDegree;
-    final latKey = _key(roundedLat);
-    final lonKey = _key(roundedLon);
-    return Region(
-      id: 'osm-area-$latKey-$lonKey',
-      name: 'Current area',
-      administrativeArea: '50-mile offline coverage',
-      country: '',
-      bounds: GeoBounds(
-        south: roundedLat - latDelta,
-        west: roundedLon - lonDelta,
-        north: roundedLat + latDelta,
-        east: roundedLon + lonDelta,
-      ),
-      version: 1,
-      downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
-      approximateBytes: 8000000,
-    );
+class AreaLabel {
+  const AreaLabel(this.city, this.administrativeArea, this.country);
+  final String city;
+  final String administrativeArea;
+  final String country;
+}
+
+class DeviceAreaLabelResolver implements AreaLabelResolver {
+  DeviceAreaLabelResolver({Geocoding? geocoding})
+    : _geocoding = geocoding ?? Geocoding();
+  final Geocoding _geocoding;
+
+  @override
+  Future<AreaLabel> label(Coordinates coordinates) async {
+    try {
+      final values = await _geocoding
+          .placemarkFromCoordinates(coordinates.latitude, coordinates.longitude)
+          .timeout(const Duration(seconds: 8));
+      final place = values.first;
+      final city = _firstNonEmpty([
+        place.locality,
+        place.subAdministrativeArea,
+        place.administrativeArea,
+      ]);
+      return AreaLabel(
+        city ?? 'Current location',
+        place.administrativeArea ?? '',
+        place.isoCountryCode ?? place.country ?? '',
+      );
+    } catch (_) {
+      return const AreaLabel('Current location', '', '');
+    }
   }
 
-  String _key(double value) =>
-      value.toStringAsFixed(1).replaceAll('-', 'm').replaceAll('.', 'p');
-}
-
-class BundledRegionResolver implements RegionResolver {
-  BundledRegionResolver([List<Region>? regions])
-    : regions = regions ?? bundledRegions;
-  final List<Region> regions;
-  @override
-  Future<Region?> resolve(Coordinates coordinates) async {
-    for (final region in regions) {
-      if (region.bounds.contains(coordinates)) return region;
+  String? _firstNonEmpty(List<String?> values) {
+    for (final value in values) {
+      if (value != null && value.trim().isNotEmpty) return value.trim();
     }
     return null;
   }
 }
 
-final bundledRegions = <Region>[
-  Region(
-    id: 'us-tn-memphis',
-    name: 'Memphis',
-    administrativeArea: 'Tennessee',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 34.95,
-      west: -90.35,
-      north: 35.38,
-      east: -89.65,
-    ),
-    version: 2,
-    downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
-    approximateBytes: 2500000,
-  ),
-  Region(
-    id: 'us-tn-nashville',
-    name: 'Nashville',
-    administrativeArea: 'Tennessee',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 35.90,
-      west: -87.10,
-      north: 36.42,
-      east: -86.50,
-    ),
-    version: 2,
-    downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
-    approximateBytes: 2500000,
-  ),
-  Region(
-    id: 'us-tx-dallas',
-    name: 'Dallas',
-    administrativeArea: 'Texas',
-    country: 'US',
-    bounds: const GeoBounds(
-      south: 32.55,
-      west: -97.10,
-      north: 33.10,
-      east: -96.45,
-    ),
-    version: 2,
-    downloadUrl: Uri.parse('https://overpass-api.de/api/interpreter'),
-    approximateBytes: 2500000,
-  ),
-];
+abstract interface class OvertureReleaseResolver {
+  Future<String> latest();
+}
+
+class StacOvertureReleaseResolver implements OvertureReleaseResolver {
+  StacOvertureReleaseResolver({http.Client? client})
+    : _client = client ?? http.Client();
+  final http.Client _client;
+  static const fallbackRelease = '2026-07-22.0';
+
+  @override
+  Future<String> latest() async {
+    try {
+      final response = await _client
+          .get(Uri.parse('https://stac.overturemaps.org/catalog.json'))
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return fallbackRelease;
+      final value =
+          (jsonDecode(response.body) as Map<String, dynamic>)['latest'];
+      return value is String && value.isNotEmpty ? value : fallbackRelease;
+    } catch (_) {
+      return fallbackRelease;
+    }
+  }
+}
+
+class LocationRegionResolver implements RegionResolver {
+  LocationRegionResolver({
+    AreaLabelResolver? labels,
+    OvertureReleaseResolver? releases,
+  }) : _labels = labels ?? DeviceAreaLabelResolver(),
+       _releases = releases ?? StacOvertureReleaseResolver();
+  final AreaLabelResolver _labels;
+  final OvertureReleaseResolver _releases;
+
+  @override
+  Future<Region?> resolve(Coordinates coordinates) async =>
+      (await options(coordinates)).first;
+
+  @override
+  Future<List<Region>> options(Coordinates coordinates) async {
+    final results = await Future.wait([
+      _labels.label(coordinates),
+      _releases.latest(),
+    ]);
+    final label = results[0] as AreaLabel;
+    final release = results[1] as String;
+    return [
+      50,
+      100,
+      150,
+    ].map((miles) => _region(coordinates, label, release, miles)).toList();
+  }
+
+  Region _region(
+    Coordinates center,
+    AreaLabel label,
+    String release,
+    int miles,
+  ) {
+    final latitudeDelta = miles / 69.0;
+    final longitudeDelta =
+        miles /
+        (69.172 *
+            math.max(.15, math.cos(center.latitude * math.pi / 180).abs()));
+    final coordinateKey =
+        '${center.latitude.toStringAsFixed(3)}_${center.longitude.toStringAsFixed(3)}'
+            .replaceAll('-', 'm')
+            .replaceAll('.', 'p');
+    return Region(
+      id: 'overture-$coordinateKey-${miles}mi',
+      name: label.city,
+      administrativeArea: label.administrativeArea,
+      country: label.country,
+      center: center,
+      bounds: GeoBounds(
+        south: center.latitude - latitudeDelta,
+        west: center.longitude - longitudeDelta,
+        north: center.latitude + latitudeDelta,
+        east: center.longitude + longitudeDelta,
+      ),
+      version: _versionOf(release),
+      release: release,
+      downloadUrl: Uri.parse(
+        'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/$release/places.pmtiles',
+      ),
+      approximateBytes: miles * miles * 11500,
+      coverageMiles: miles,
+    );
+  }
+
+  int _versionOf(String release) =>
+      int.tryParse(release.replaceAll(RegExp('[^0-9]'), '')) ?? 1;
+}
+
+const legacyRegionIds = {
+  'us-tn-memphis',
+  'us-tn-memphis-50mi',
+  'us-tn-memphis-100mi',
+  'us-tn-memphis-150mi',
+  'us-tn-nashville',
+  'us-tx-dallas',
+};
