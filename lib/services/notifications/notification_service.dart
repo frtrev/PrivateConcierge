@@ -1,4 +1,7 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+enum CarNotificationAction { read, directions }
 
 abstract interface class NotificationService {
   Future<void> initialize();
@@ -6,10 +9,15 @@ abstract interface class NotificationService {
     required int id,
     required String title,
     required String body,
+    CarNotificationAction action = CarNotificationAction.read,
+    double? latitude,
+    double? longitude,
+    String? placeName,
   });
 }
 
 class LocalNotificationService implements NotificationService {
+  static const _carChannel = MethodChannel('charon/car');
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
@@ -52,6 +60,10 @@ class LocalNotificationService implements NotificationService {
     required int id,
     required String title,
     required String body,
+    CarNotificationAction action = CarNotificationAction.read,
+    double? latitude,
+    double? longitude,
+    String? placeName,
   }) async {
     await _plugin.show(
       id: id,
@@ -75,5 +87,18 @@ class LocalNotificationService implements NotificationService {
         ),
       ),
     );
+    try {
+      await _carChannel.invokeMethod<void>('publishNotification', {
+        'id': id,
+        'title': title,
+        'body': body,
+        'action': action.name,
+        'latitude': ?latitude,
+        'longitude': ?longitude,
+        'placeName': ?placeName,
+      });
+    } on MissingPluginException {
+      // The CarPlay bridge only exists on iOS.
+    }
   }
 }

@@ -86,6 +86,14 @@ class MainActivity : FlutterActivity() {
                     // Android Auto owns its templates and submits directly through
                     // this engine. Phone-only status/result publication is optional.
                     "publishStatus", "publishResult" -> result.success(true)
+                    "publishNotification" -> {
+                        @Suppress("UNCHECKED_CAST")
+                        CarNotificationStore.publish(
+                            applicationContext,
+                            call.arguments as? Map<String, Any?> ?: emptyMap()
+                        )
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }

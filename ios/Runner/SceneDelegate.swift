@@ -22,13 +22,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     _ templateApplicationScene: CPTemplateApplicationScene,
     didConnect interfaceController: CPInterfaceController
   ) {
-    let talk = CPGridButton(
-      titleVariants: ["Talk to Charon"],
-      image: microphoneButtonImage()
-    ) { _ in
-      (UIApplication.shared.delegate as? AppDelegate)?.requestTalkFromCar()
-    }
-    let template = CPGridTemplate(title: "Private Concierge", gridButtons: [talk])
+    let template = CarPlaySessionCoordinator.shared.makeHomeTemplate()
     interfaceController.setRootTemplate(template, animated: false, completion: nil)
     CarPlaySessionCoordinator.shared.connect(
       interfaceController,
@@ -44,7 +38,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     CarPlaySessionCoordinator.shared.disconnect(interfaceController)
   }
 
-  private func microphoneButtonImage() -> UIImage {
+  static func microphoneButtonImage() -> UIImage {
     let size = CGSize(width: 120, height: 120)
     let renderer = UIGraphicsImageRenderer(size: size)
     return renderer.image { context in
@@ -83,6 +77,36 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
 @available(iOS 14.0, *)
 final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
+  private struct CarNotification {
+    let id: Int
+    let title: String
+    let body: String
+    let action: String
+    let latitude: Double?
+    let longitude: Double?
+    let placeName: String?
+
+    init(payload: [String: Any]) {
+      id = (payload["id"] as? NSNumber)?.intValue ?? UUID().hashValue
+      title = payload["title"] as? String ?? "Charon"
+      body = payload["body"] as? String ?? ""
+      action = payload["action"] as? String ?? "read"
+      latitude = (payload["latitude"] as? NSNumber)?.doubleValue
+      longitude = (payload["longitude"] as? NSNumber)?.doubleValue
+      placeName = payload["placeName"] as? String
+    }
+
+    var payload: [String: Any] {
+      var value: [String: Any] = [
+        "id": id, "title": title, "body": body, "action": action,
+      ]
+      if let latitude { value["latitude"] = latitude }
+      if let longitude { value["longitude"] = longitude }
+      if let placeName { value["placeName"] = placeName }
+      return value
+    }
+  }
+
   private struct PendingAlert {
     let payload: [String: Any]
     let queuedAt: Date
@@ -93,6 +117,7 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   private weak var carPlayScene: CPTemplateApplicationScene?
   private var homeTemplate: CPTemplate?
   private var latestPayload: [String: Any]?
+  private var recentNotifications: [CarNotification] = []
   private let speechSynthesizer = AVSpeechSynthesizer()
   private var listenAfterSpeech = false
   private var changingRootTemplate = false
@@ -107,11 +132,185 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   private weak var processingItem: CPListItem?
   private var processingPhase = 0
   private var responseAudioHasStarted = false
+  private var notificationInteractionActive = false
   private let alertLifetime: TimeInterval = 5 * 60
 
   private override init() {
     super.init()
     speechSynthesizer.delegate = self
+    let saved = UserDefaults.standard.array(forKey: "charon.carNotifications")
+      as? [[String: Any]] ?? []
+    recentNotifications = saved.prefix(6).map(CarNotification.init(payload:))
+  }
+
+  func makeHomeTemplate() -> CPTemplate {
+    let talk = talkButton()
+    if #available(iOS 26.0, *) {
+      let notifications = recentNotifications
+      let cards = notifications.map { notification in
+        CPListImageRowItemCardElement(
+          image: notificationImage(action: notification.action),
+          showsImageFullHeight: false,
+          title: notification.title,
+          subtitle: notification.body,
+          tintColor: nil
+        )
+      }
+      let row = CPListImageRowItem(
+        text: nil,
+        cardElements: cards,
+        allowsMultipleLines: false
+      )
+      row.listImageRowHandler = { [weak self] _, index, completion in
+        if notifications.indices.contains(index) {
+          self?.perform(notifications[index])
+        }
+        completion()
+      }
+      let sections = cards.isEmpty
+        ? []
+        : [CPListSection(items: [row])]
+      return CPListTemplate(
+        title: "Private Concierge",
+        sections: sections,
+        assistantCellConfiguration: nil,
+        headerGridButtons: [talk]
+      )
+    }
+    let notificationButtons = recentNotifications.map { notification in
+      CPGridButton(
+        titleVariants: [
+          [notification.title, notification.body]
+            .filter { !$0.isEmpty }.joined(separator: " — "),
+          notification.title,
+        ],
+        image: self.notificationImage(action: notification.action)
+      ) { [weak self] _ in
+        self?.perform(notification)
+      }
+    }
+    return CPGridTemplate(
+      title: "Private Concierge",
+      gridButtons: [talk] + notificationButtons
+    )
+  }
+
+  private func talkButton() -> CPGridButton {
+    CPGridButton(
+      titleVariants: ["Talk to Charon"],
+      image: CarPlaySceneDelegate.microphoneButtonImage()
+    ) { _ in
+      (UIApplication.shared.delegate as? AppDelegate)?.requestTalkFromCar()
+    }
+  }
+
+  func publishNotification(_ payload: [String: Any]) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      let notification = CarNotification(payload: payload)
+      self.recentNotifications.removeAll { $0.id == notification.id }
+      self.recentNotifications.insert(notification, at: 0)
+      self.recentNotifications = Array(self.recentNotifications.prefix(6))
+      UserDefaults.standard.set(
+        self.recentNotifications.map(\.payload),
+        forKey: "charon.carNotifications"
+      )
+      let home = self.makeHomeTemplate()
+      self.homeTemplate = home
+      if self.latestPayload == nil && self.activePrayer == nil {
+        self.setRootTemplate(home, animated: true)
+      }
+    }
+  }
+
+  private func notificationImage(action: String) -> UIImage {
+    let name = action == "directions" ? "location.fill" : "text.bubble.fill"
+    return UIImage(systemName: name) ?? UIImage(systemName: "bell.fill") ?? UIImage()
+  }
+
+  private func perform(_ notification: CarNotification) {
+    let canNavigate = notification.action == "directions"
+      && notification.latitude != nil && notification.longitude != nil
+    var text = [notification.title, notification.body]
+      .filter { !$0.isEmpty }.joined(separator: ". ")
+    if canNavigate {
+      let place = notification.placeName ?? notification.title
+      text += ". Would you like to navigate to \(place)?"
+    }
+    startProcessingAnimation(
+      transcript: notification.title,
+      message: "Thinking, please wait…",
+      detailPrefix: "Preparing notification"
+    )
+    notificationInteractionActive = true
+    (UIApplication.shared.delegate as? AppDelegate)?.speakCarResponse(text) {
+      [weak self] _ in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.notificationInteractionActive = false
+        self.stopProcessingAnimation()
+        if canNavigate {
+          self.showNavigationChoice(notification)
+        } else {
+          self.showReadNotification(notification)
+        }
+      }
+    }
+  }
+
+  private func showReadNotification(_ notification: CarNotification) {
+    let response = CPListItem(text: notification.title, detailText: notification.body)
+    if #available(iOS 15.0, *) { response.isEnabled = false }
+    else { response.handler = { _, completion in completion() } }
+    let goBack = CPListItem(text: "Go Back", detailText: nil)
+    goBack.handler = { [weak self] _, completion in
+      self?.showHome()
+      completion()
+    }
+    setRootTemplate(
+      CPListTemplate(
+        title: "Private Concierge",
+        sections: [CPListSection(items: [response, goBack])]
+      ),
+      animated: true
+    )
+  }
+
+  private func showNavigationChoice(_ notification: CarNotification) {
+    let placeName = notification.placeName ?? notification.title
+    let question = CPListItem(
+      text: "Navigate to \(placeName)?",
+      detailText: notification.body
+    )
+    if #available(iOS 15.0, *) { question.isEnabled = false }
+    else { question.handler = { _, completion in completion() } }
+    let navigateItem = CPListItem(text: "Navigate", detailText: "Open in Maps")
+    navigateItem.handler = { [weak self] _, completion in
+      guard let latitude = notification.latitude,
+        let longitude = notification.longitude
+      else {
+        completion()
+        return
+      }
+      self?.navigate(to: [
+        "name": placeName,
+        "latitude": latitude,
+        "longitude": longitude,
+      ])
+      completion()
+    }
+    let goBack = CPListItem(text: "Go Back", detailText: nil)
+    goBack.handler = { [weak self] _, completion in
+      self?.showHome()
+      completion()
+    }
+    setRootTemplate(
+      CPListTemplate(
+        title: "Private Concierge",
+        sections: [CPListSection(items: [question, navigateItem, goBack])]
+      ),
+      animated: true
+    )
   }
 
   func connect(
@@ -132,6 +331,7 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
     carPlayScene = nil
     homeTemplate = nil
     presentingAlert = false
+    notificationInteractionActive = false
     stopProcessingAnimation()
     stopPrayer()
   }
@@ -240,6 +440,7 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
 
   func showHome() {
     stopProcessingAnimation()
+    notificationInteractionActive = false
     stopPrayer()
     guard let homeTemplate else { return }
     latestPayload = nil
@@ -336,18 +537,23 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
   }
 
   func responseAudioStarted() {
+    guard !notificationInteractionActive else { return }
     guard !responseAudioHasStarted else { return }
     responseAudioHasStarted = true
     stopProcessingAnimation()
     renderLatestResult()
   }
 
-  private func startProcessingAnimation(transcript: String) {
+  private func startProcessingAnimation(
+    transcript: String,
+    message: String = "Thinking, please wait…",
+    detailPrefix: String = "You said"
+  ) {
     stopProcessingAnimation()
     processingPhase = 0
     let item = CPListItem(
-      text: "Thinking, please wait…",
-      detailText: processingDetail(transcript: transcript)
+      text: message,
+      detailText: processingDetail(transcript: transcript, prefix: detailPrefix)
     )
     if #available(iOS 15.0, *) { item.isEnabled = false }
     else { item.handler = { _, completion in completion() } }
@@ -363,13 +569,15 @@ final class CarPlaySessionCoordinator: NSObject, AVSpeechSynthesizerDelegate {
       [weak self] _ in
       guard let self, let item = self.processingItem else { return }
       self.processingPhase = (self.processingPhase + 1) % 4
-      item.setDetailText(self.processingDetail(transcript: transcript))
+      item.setDetailText(
+        self.processingDetail(transcript: transcript, prefix: detailPrefix)
+      )
     }
   }
 
-  private func processingDetail(transcript: String) -> String {
+  private func processingDetail(transcript: String, prefix: String = "You said") -> String {
     let pulse = ["●  ○  ○", "○  ●  ○", "○  ○  ●", "○  ●  ○"][processingPhase]
-    return "\(pulse)\nYou said: \(transcript)"
+    return "\(pulse)\n\(prefix): \(transcript)"
   }
 
   private func stopProcessingAnimation() {

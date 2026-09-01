@@ -306,6 +306,10 @@ class DrivingContextEngine {
       id: Object.hash('driving-fuel', station.id) & 0x7fffffff,
       title: 'Gas station nearby',
       body: '${station.name} is ${miles.toStringAsFixed(1)} miles away.',
+      action: CarNotificationAction.directions,
+      latitude: station.coordinates.latitude,
+      longitude: station.coordinates.longitude,
+      placeName: station.name,
     );
   }
 }

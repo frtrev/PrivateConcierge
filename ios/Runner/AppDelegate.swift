@@ -156,6 +156,15 @@ import Network
         result(true)
         return
       }
+      if call.method == "publishNotification",
+        let payload = call.arguments as? [String: Any]
+      {
+        if #available(iOS 14.0, *) {
+          CarPlaySessionCoordinator.shared.publishNotification(payload)
+        }
+        result(true)
+        return
+      }
       if call.method == "prayerPlaybackState",
         let payload = call.arguments as? [String: Any]
       {

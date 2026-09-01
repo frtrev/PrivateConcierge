@@ -54,6 +54,7 @@ class AppDependencies {
     required this.localAi,
     required this.prayerConversation,
     required this.prayers,
+    required this.notifications,
   });
   final BootstrapService bootstrap;
   final RegionPackageManager packages;
@@ -72,6 +73,7 @@ class AppDependencies {
   final DevelopmentLocalAiService localAi;
   final PrayerConversationService prayerConversation;
   final PrayerStore prayers;
+  final NotificationService notifications;
   static Future<AppDependencies> create() async {
     final preferences = await SharedPreferences.getInstance();
     const configuredManifest = String.fromEnvironment(
@@ -185,6 +187,7 @@ class AppDependencies {
       localAi: localAi,
       prayerConversation: prayerConversation,
       prayers: privateData,
+      notifications: notifications,
     );
   }
 }
